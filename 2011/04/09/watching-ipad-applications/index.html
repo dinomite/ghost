@@ -1,0 +1,185 @@
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <title>Watching Ipad Applications</title>
+    <meta name="description" content="">
+
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="shortcut icon" href="../../../../favicon.ico">
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Merriweather:300,700,700italic,300italic%7COpen+Sans:700,400">
+    <link rel="stylesheet" type="text/css" href="../../../../assets/css/screen.css?v=830db2c5c6">
+
+
+    <link rel="canonical" href="index.html">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <link rel="amphtml" href="http://localhost:2368/2011/04/09/watching-ipad-applications/amp/">
+    
+    <meta property="og:site_name" content="Dinomite.net">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Watching Ipad Applications">
+    <meta property="og:description" content="Shortly after the release of The Daily, Andy Baio created The Daily: Indexed and, more importantly, described how he created that index in a blog post.  The crux of his reverse engineering of The Daily app was Charles, which he describes how to use in the aforementioned blog post.  Since">
+    <meta property="og:url" content="http://localhost:2368/2011/04/09/watching-ipad-applications/">
+    <meta property="article:published_time" content="2011-04-09T12:00:00.000Z">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Watching Ipad Applications">
+    <meta name="twitter:description" content="Shortly after the release of The Daily, Andy Baio created The Daily: Indexed and, more importantly, described how he created that index in a blog post.  The crux of his reverse engineering of The Daily app was Charles, which he describes how to use in the aforementioned blog post.  Since">
+    <meta name="twitter:url" content="http://localhost:2368/2011/04/09/watching-ipad-applications/">
+    <meta name="twitter:label1" content="Written by">
+    <meta name="twitter:data1" content="Drew Stephens">
+    
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Dinomite.net",
+        "logo": "http://localhost:2368/ghost/img/ghosticon.jpg"
+    },
+    "author": {
+        "@type": "Person",
+        "name": "Drew Stephens",
+        "image": {
+            "@type": "ImageObject",
+            "url": "//www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s=250&d=mm&r=x",
+            "width": 250,
+            "height": 250
+        },
+        "url": "http://localhost:2368/author/drew/",
+        "sameAs": []
+    },
+    "headline": "Watching Ipad Applications",
+    "url": "http://localhost:2368/2011/04/09/watching-ipad-applications/",
+    "datePublished": "2011-04-09T12:00:00.000Z",
+    "description": "Shortly after the release of The Daily, Andy Baio created The Daily: Indexed and, more importantly, described how he created that index in a blog post.  The crux of his reverse engineering of The Daily app was Charles, which he describes how to use in the aforementioned blog post.  Since",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "http://localhost:2368"
+    }
+}
+    </script>
+
+    <meta name="generator" content="Ghost 0.11">
+    <link rel="alternate" type="application/rss+xml" title="Dinomite.net" href="../../../../rss/index.html">
+</head>
+<body class="post-template nav-closed">
+
+    <div class="nav">
+    <h3 class="nav-title">Menu</h3>
+    <a href="index.html#" class="nav-close">
+        <span class="hidden">Close</span>
+    </a>
+    <ul>
+            <li class="nav-home"><a href="../../../../">Home</a></li>
+    </ul>
+        <a class="subscribe-button icon-feed" href="../../../../rss/index.rss">Subscribe</a>
+</div>
+<span class="nav-cover"></span>
+
+
+    <div class="site-wrapper">
+
+        
+
+
+<header class="main-header post-head no-cover">
+    <nav class="main-nav  clearfix">
+        
+            <a class="menu-button icon-menu" href="index.html#"><span class="word">Menu</span></a>
+    </nav>
+</header>
+
+<main class="content" role="main">
+    <article class="post">
+
+        <header class="post-header">
+            <h1 class="post-title">Watching Ipad Applications</h1>
+            <section class="post-meta">
+                <time class="post-date" datetime="2011-04-09">09 April 2011</time> 
+            </section>
+        </header>
+
+        <section class="post-content">
+            <p>Shortly after the release of <a href="http://www.thedaily.com">The Daily</a>, <a href="http://waxy.org">Andy Baio</a> created <a href="http://thedailyindexed.tumblr.com">The Daily: Indexed</a> and, more importantly, described how he created that index in <a href="http://waxy.org/2011/02/how_i_indexed_the_daily/">a blog post</a>.  The crux of his reverse engineering of The Daily app was <a href="http://www.charlesproxy.com">Charles</a>, which he describes how to use in the aforementioned blog post.  Since reading that post, I've wanted to explore a number of applications on my iPad and iPhone to see what they're really doing when they cause the network indicator to spin.</p>
+
+<p>First things first, I setup Charles and started up <a href="http://reederapp.com/">Reeder</a>, an RSS feed reader that integrates tightly with Google Reader.  My main interest was to see when it actually marked posts as read--I often read in short spurts on my iPhone, which results in pulling up a post only to switch out of Reeder or lock my phone seconds later.  Sometimes the posts would be marked read if I pulled up Google Reader, but sometimes they were still marked unread.  Was this a network latency problem when the phone was using 3G/Edge internet, or was it Reeder doing some fanciness with when it marked posts read?</p>
+
+<p>I didn't get to my goal right away because the first thing I noticed upon starting up Reeder is that it hits the original blog for every single one of the feeds that I subscribed to in Google Reader.  As someone who hasn't cleaned up a number of blogs that don't post anymore, this was a few hundred feeds.  I shouldn't have been surprised by this, as it doesn't really make sense for Google to pull all of the content for all of those blogs and package it up for my convenience.</p>
+
+<p>Getting back to my initial focus, Reeder attempts to mark a post read as soon as you open a post--any failure of a post being marked read is because the network was slow or inoperative at the time you were reading.  Reeder periodically refreshes all of your feeds, as indicated by the spinning icon on the iPad or the replaced battery display on the iPhone, but it actually spends much longer doing this than the icon's state would lead you to believe.  From day-to-day usage the update to the feeds I care about (read: those that actually have updates) is done in short order, but Charles reveals that Reeder is still pulling data from individual websites.  My guess is that Reeder pulls the feed list from Google, gets the new posts mentioned therein, and then proceeds to do its own checking of feeds.</p>
+
+<p>Reeder was the only app that had really crossed my mind after Andy Baio's post, and it fulfilled my desire to experiment with Charles, which is a very good tool that I'll turn to if I have future questions that need answering. </p>
+        </section>
+
+        <footer class="post-footer">
+
+
+            <figure class="author-image">
+                <a class="img" href="../../../../author/drew/" style="background-image: url(http://www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s&amp;)"><span class="hidden">Drew Stephens's Picture</span></a>
+            </figure>
+
+            <section class="author">
+                <h4><a href="../../../../author/drew/">Drew Stephens</a></h4>
+
+                    <p>Read <a href="../../../../author/drew/">more posts</a> by this author.</p>
+                <div class="author-meta">
+                    
+                    
+                </div>
+            </section>
+
+
+            <section class="share">
+                <h4>Share this post</h4>
+                <a class="icon-twitter" href="https://twitter.com/intent/tweet?text=Watching%20Ipad%20Applications&amp;url=http://localhost:2368/2011/04/09/watching-ipad-applications/" onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+                    <span class="hidden">Twitter</span>
+                </a>
+                <a class="icon-facebook" href="https://www.facebook.com/sharer/sharer.php?u=http://localhost:2368/2011/04/09/watching-ipad-applications/" onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+                    <span class="hidden">Facebook</span>
+                </a>
+                <a class="icon-google-plus" href="https://plus.google.com/share?url=http://localhost:2368/2011/04/09/watching-ipad-applications/" onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+                    <span class="hidden">Google+</span>
+                </a>
+            </section>
+
+
+        </footer>
+
+    </article>
+</main>
+
+<aside class="read-next">
+    <a class="read-next-story no-cover" href="../../21/building-an-olympic-lifting-platform/">
+        <section class="post">
+            <h2>Building An Olympic Lifting Platform</h2>
+            <p>CrossFit got me started on Olympic lifting and it is now one of my favorite things that I do…</p>
+        </section>
+    </a>
+    <a class="read-next-story prev no-cover" href="../../../03/07/paleo-egg-muffins/">
+        <section class="post">
+            <h2>Paleo Egg Muffins</h2>
+            <p>There are a number of recipes for paleo muffins, which are a great way to get fast paleo food…</p>
+        </section>
+    </a>
+</aside>
+
+
+
+        <footer class="site-footer clearfix">
+            <section class="copyright"><a href="../../../../">Dinomite.net</a> © 2017</section>
+            <section class="poweredby">Proudly published with <a href="https://ghost.org">Ghost</a></section>
+        </footer>
+
+    </div>
+
+    <script type="text/javascript" src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
+    
+    <script type="text/javascript" src="../../../../assets/js/jquery.fitvids.js?v=830db2c5c6"></script>
+    <script type="text/javascript" src="../../../../assets/js/index.js?v=830db2c5c6"></script>
+
+</body>

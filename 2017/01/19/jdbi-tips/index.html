@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <title>Jdbi Tips</title>
+    <meta name="description" content="" />
+
+    <meta name="HandheldFriendly" content="True" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link rel="shortcut icon" href="../../../../favicon.ico">
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Merriweather:300,700,700italic,300italic|Open+Sans:700,400" />
+    <link rel="stylesheet" type="text/css" href="../../../../assets/css/screen.css?v=830db2c5c6" />
+
+
+    <link rel="canonical" href="index.html" />
+    <meta name="referrer" content="no-referrer-when-downgrade" />
+    <link rel="amphtml" href="amp/index.html" />
+    
+    <meta property="og:site_name" content="Dinomite.net" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Jdbi Tips" />
+    <meta property="og:description" content="I&#x27;ve been using JDBI in Java &amp;amp; Kotlin projects recently and have come across a few things that aren&#x27;t entirely intuitive.  If you&#x27;re having trouble with JDBI, be sure to check the docs; if you don&#x27;t find an answer there, the issues on GitHub is a great place to look" />
+    <meta property="og:url" content="http://localhost:2368/2017/01/19/jdbi-tips/" />
+    <meta property="article:published_time" content="2017-01-19T12:00:00.000Z" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Jdbi Tips" />
+    <meta name="twitter:description" content="I&#x27;ve been using JDBI in Java &amp;amp; Kotlin projects recently and have come across a few things that aren&#x27;t entirely intuitive.  If you&#x27;re having trouble with JDBI, be sure to check the docs; if you don&#x27;t find an answer there, the issues on GitHub is a great place to look" />
+    <meta name="twitter:url" content="http://localhost:2368/2017/01/19/jdbi-tips/" />
+    <meta name="twitter:label1" content="Written by" />
+    <meta name="twitter:data1" content="Drew Stephens" />
+    
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Dinomite.net",
+        "logo": "http://localhost:2368/ghost/img/ghosticon.jpg"
+    },
+    "author": {
+        "@type": "Person",
+        "name": "Drew Stephens",
+        "image": {
+            "@type": "ImageObject",
+            "url": "//www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s=250&d=mm&r=x",
+            "width": 250,
+            "height": 250
+        },
+        "url": "http://localhost:2368/author/drew/",
+        "sameAs": []
+    },
+    "headline": "Jdbi Tips",
+    "url": "http://localhost:2368/2017/01/19/jdbi-tips/",
+    "datePublished": "2017-01-19T12:00:00.000Z",
+    "description": "I&#x27;ve been using JDBI in Java &amp;amp; Kotlin projects recently and have come across a few things that aren&#x27;t entirely intuitive.  If you&#x27;re having trouble with JDBI, be sure to check the docs; if you don&#x27;t find an answer there, the issues on GitHub is a great place to look",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "http://localhost:2368"
+    }
+}
+    </script>
+
+    <meta name="generator" content="Ghost 0.11" />
+    <link rel="alternate" type="application/rss+xml" title="Dinomite.net" href="../../../../rss/index.html" />
+</head>
+<body class="post-template nav-closed">
+
+    <div class="nav">
+    <h3 class="nav-title">Menu</h3>
+    <a href="index.html#" class="nav-close">
+        <span class="hidden">Close</span>
+    </a>
+    <ul>
+            <li class="nav-home"><a href="../../../../index.html">Home</a></li>
+    </ul>
+        <a class="subscribe-button icon-feed" href="../../../../rss/index.html">Subscribe</a>
+</div>
+<span class="nav-cover"></span>
+
+
+    <div class="site-wrapper">
+
+        
+
+
+<header class="main-header post-head no-cover">
+    <nav class="main-nav  clearfix">
+        
+            <a class="menu-button icon-menu" href="index.html#"><span class="word">Menu</span></a>
+    </nav>
+</header>
+
+<main class="content" role="main">
+    <article class="post">
+
+        <header class="post-header">
+            <h1 class="post-title">Jdbi Tips</h1>
+            <section class="post-meta">
+                <time class="post-date" datetime="2017-01-19">19 January 2017</time> 
+            </section>
+        </header>
+
+        <section class="post-content">
+            <p>I've been using <a href="http://jdbi.org/">JDBI</a> in Java &amp; <a href="https://kotlinlang.org/">Kotlin</a> projects recently and have come across a few things that aren't entirely intuitive.  If you're having trouble with JDBI, be sure to check <a href="http://jdbi.org/archive.html">the docs</a>; if you don't find an answer there, the <a href="https://github.com/jdbi/jdbi/issues">issues on GitHub</a> is a great place to look for more esoteric uses of the library.</p>
+
+<h1 id="guice">Guice</h1>
+
+<p>I have a Dropwizard app that I use with Guice via <a href="https://github.com/xvik/dropwizard-guicey">dropwizard-guicey</a>.  While the <a href="http://www.dropwizard.io/1.0.0/docs/manual/jdbi.html">Dropwizard docs</a> cover using JDBI, constructing instances is a bit different with dropwizard-guicey.  My (Kotlin) module for registering DAOs looks like this:</p>
+
+<pre><code class="language-java">class DaoModule : DropwizardAwareModule&lt;AppConfiguration&gt;() {  
+    override fun configure() {
+        val factory = AppDBIFactory()
+        val dataSourceFactory = configuration().dataSourceFactory
+        val jdbi = factory.build(environment(), dataSourceFactory, "postgresql")
+        jdbi.registerArgumentFactory(PgIntegerArrayArgFactory())
+        bind(DBI::class.java).toInstance(jdbi)
+
+        val apiKeyDao = jdbi.onDemand(ApiKeyDao::class.java)
+        bind(ApiKeyDao::class.java).toInstance(apiKeyDao)
+    }
+}
+
+class AppDBIFactory : DBIFactory() {  
+    override fun databaseTimeZone(): Optional&lt;TimeZone&gt;? {
+        return Optional.of(TimeZone.getTimeZone("UTC"))
+    }
+}
+</code></pre>
+
+<p>More on the <code>PgIntegerArrayArgFactory</code> below.</p>
+
+<h1 id="queryingenums">Querying Enums</h1>
+
+<p>JDBI's default binding of <code>enum</code> arguments <a href="https://github.com/jdbi/jdbi/blob/292b089cfd4e6a6f5f41c9bd320bade1f66926da/src/main/java/org/skife/jdbi/v2/EnumArgument.java#L37">calls <code>.name()</code></a> on the enum object.  I have enums that instead use the ordinal value in a numeric database column, so I need the binding to call <code>.ordinal()</code> instead.  To accomplish this, I create a special binding factory, which looks a bit nasty, but it's actual action is quite straighforward:</p>
+
+<pre><code class="language-java">@BindingAnnotation(BindStatus.StatusBinderFactory.class)
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.PARAMETER})
+public @interface BindWidgetStatus {  
+    class StatusBinderFactory implements BinderFactory {
+        public Binder build(Annotation annotation) {
+            return new Binder&lt;BindStatus, Status&gt;() {
+                public void bind(SQLStatement q, BindStatus bind, Status arg) {
+                    q.bind("status", arg.ordinal());
+                }
+            };
+        }
+    }
+}
+</code></pre>
+
+<p>The operative part is down in the deepest indentation—bind the ordinal value of the enum to whatever you will use as the placeholder string in the query.  Then, in the DAO:</p>
+
+<pre><code class="language-java">@RegisterMapper(WidgetMapper::class)
+interface WidgetDao {  
+    @SqlQuery("SELECT * FROM widgets WHERE status = :status ")
+    fun getWidgets(@BindWidgetStatus status: Widget.Status): List&lt;Widget&gt;
+}
+</code></pre>
+
+<p>Be sure to use the same placeholder string as in the <code>BinderFactory</code> above (in this case <code>status</code>).</p>
+
+<h1 id="arrayarguments">Array arguments</h1>
+
+<p>Sometimes I want to be able to select widgets in any <code>Status</code>.  In SQL, I would use an <code>IN</code> clause: "<code>...WHERE status IN (0, 1, 2)</code>" and, with a bit more setup JDBI can do the same.  First, the enum in question:</p>
+
+<pre><code class="language-java">data class Widget(val id: Int, val status: Status) {  
+    enum class Status {
+        UNREAD, READ, ALL;
+
+        fun queryValue(): Array&lt;Int&gt; {
+            if (this == ALL) {
+                return arrayOf(UNREAD.ordinal, READ.ordinal)
+            }
+
+            return arrayOf(this.ordinal)
+        }
+    }
+}
+</code></pre>
+
+<p>And change the <code>Binder</code> to use the <code>queryValue()</code> method:</p>
+
+<pre><code class="language-java">@BindingAnnotation(BindStatus.StatusBinderFactory.class)
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.PARAMETER})
+public @interface BindWidgetStatus {  
+    class StatusBinderFactory implements BinderFactory {
+        public Binder build(Annotation annotation) {
+            return new Binder&lt;BindStatus, Status&gt;() {
+                public void bind(SQLStatement q, BindStatus bind, Status arg) {
+                    q.bind("status", SqlArray.arrayOf(Integer.class, arg.queryValue()));
+                }
+            };
+        }
+    }
+}
+</code></pre>
+
+<p>That <code>SqlArray</code> is a just a POJO for holding the things to be bound:</p>
+
+<pre><code class="language-java">class SqlArray&lt;T&gt; {  
+    private final Object[] elements;
+    private final Class&lt;T&gt; type;
+
+    private SqlArray(Class&lt;T&gt; type, Collection&lt;T&gt; elements) {
+        this.elements = Iterables.toArray(elements, Object.class);
+        this.type = type;
+    }
+
+    @SafeVarargs
+    static &lt;T&gt; SqlArray&lt;T&gt; arrayOf(Class&lt;T&gt; type, T... elements) {
+        return new SqlArray&lt;&gt;(type, asList(elements));
+    }
+
+    Object[] getElements() {
+        return elements;
+    }
+
+    Class&lt;T&gt; getType() {
+        return type;
+    }
+}
+</code></pre>
+
+<p>Finally, also in Java, an <code>ArgumentFactory</code> to bind the SqlArray values:</p>
+
+<pre><code class="language-java">public class PgIntegerArrayArgFactory implements ArgumentFactory&lt;SqlArray&lt;Integer&gt;&gt; {  
+    public boolean accepts(Class&lt;?&gt; type, Object value, StatementContext ctx) {
+        return value instanceof SqlArray
+            &amp;&amp; ((SqlArray)value).getType().isAssignableFrom(Integer.class);
+    }
+
+    public Argument build(Class&lt;?&gt; type,
+                          final SqlArray&lt;Integer&gt; value,
+                          StatementContext ctx) {
+        return (position, statement, ctx1) -&gt; {
+            Array ary = ctx1.getConnection()
+                            .createArrayOf("integer", value.getElements());
+            statement.setArray(position, ary);
+        };
+    }
+}
+</code></pre>
+
+<p>This is described more thoroughly on <a href="http://skife.org/jdbi/java/2011/12/21/jdbi_in_clauses.html">Brian McCallister's blog</a>.  Note that he calls the above <code>ArgumentFactory</code> a toy, since it only binds one type (Integers).  Since I only use integer array arguments so far, I've left it as such.</p>
+
+<h1 id="optionalarguments">Optional arguments</h1>
+
+<p>Sometimes you want to have optional arguments in a DAO method, like an ID to start selecting records at. JDBI supports this, but in a non-intuitive way—you simply write the <code>@SqlQuery</code> to expect a possibly null value:</p>
+
+<pre><code class="language-java">    @SqlQuery("SELECT * FROM widgets " +
+              "WHERE (cast(:start_id AS INT) IS NULL OR c1.id &lt;= :start_id)")
+    fun widgets(@Bind("start_id") startId: Int?): List&lt;Widget&gt;
+</code></pre>
+
+<p>Since this is written in Kotlin, you can see that startId is nullable.  If it is null the SQL query will ignore it (the <code>where</code> clause is always true).  More details <a href="https://github.com/jdbi/jdbi/issues/381">here</a>.</p>
+        </section>
+
+        <footer class="post-footer">
+
+
+            <figure class="author-image">
+                <a class="img" href="../../../../author/drew/index.html" style="background-image: url(http://www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s&)"><span class="hidden">Drew Stephens's Picture</span></a>
+            </figure>
+
+            <section class="author">
+                <h4><a href="../../../../author/drew/index.html">Drew Stephens</a></h4>
+
+                    <p>Read <a href="../../../../author/drew/index.html">more posts</a> by this author.</p>
+                <div class="author-meta">
+                    
+                    
+                </div>
+            </section>
+
+
+            <section class="share">
+                <h4>Share this post</h4>
+                <a class="icon-twitter" href="https://twitter.com/intent/tweet?text=Jdbi%20Tips&amp;url=http://localhost:2368/2017/01/19/jdbi-tips/"
+                    onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+                    <span class="hidden">Twitter</span>
+                </a>
+                <a class="icon-facebook" href="https://www.facebook.com/sharer/sharer.php?u=http://localhost:2368/2017/01/19/jdbi-tips/"
+                    onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+                    <span class="hidden">Facebook</span>
+                </a>
+                <a class="icon-google-plus" href="https://plus.google.com/share?url=http://localhost:2368/2017/01/19/jdbi-tips/"
+                   onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+                    <span class="hidden">Google+</span>
+                </a>
+            </section>
+
+
+        </footer>
+
+    </article>
+</main>
+
+<aside class="read-next">
+    <a class="read-next-story prev no-cover" href="../../../../2016/09/23/diy-stretch-webbing-leash-a-la-ruffwear-roamer/index.html">
+        <section class="post">
+            <h2>Diy Stretch Webbing Leash a La Ruffwear Roamer</h2>
+            <p>The Ruffwear® Roamer™ leash is wonderful for running and great for anytime when you have an enthusiastic dog who&hellip;</p>
+        </section>
+    </a>
+</aside>
+
+
+
+        <footer class="site-footer clearfix">
+            <section class="copyright"><a href="../../../../index.html">Dinomite.net</a> &copy; 2017</section>
+            <section class="poweredby">Proudly published with <a href="https://ghost.org">Ghost</a></section>
+        </footer>
+
+    </div>
+
+    <script type="text/javascript" src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
+    
+    <script type="text/javascript" src="../../../../assets/js/jquery.fitvids.js?v=830db2c5c6"></script>
+    <script type="text/javascript" src="../../../../assets/js/index.js?v=830db2c5c6"></script>
+
+</body>
+</html>

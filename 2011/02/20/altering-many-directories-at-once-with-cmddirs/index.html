@@ -1,0 +1,209 @@
+
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+    <title>Altering Many Directories At Once With Cmddirs</title>
+    <meta name="description" content="">
+
+    <meta name="HandheldFriendly" content="True">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="shortcut icon" href="../../../../favicon.ico">
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Merriweather:300,700,700italic,300italic%7COpen+Sans:700,400">
+    <link rel="stylesheet" type="text/css" href="../../../../assets/css/screen.css?v=830db2c5c6">
+
+
+    <link rel="canonical" href="index.html">
+    <meta name="referrer" content="no-referrer-when-downgrade">
+    <link rel="amphtml" href="http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/amp/">
+    
+    <meta property="og:site_name" content="Dinomite.net">
+    <meta property="og:type" content="article">
+    <meta property="og:title" content="Altering Many Directories At Once With Cmddirs">
+    <meta property="og:description" content="On any machine I use I create a directory, sandbox, at the root of my home directory to hold checkouts of source code I'm working on.  This directory often contains code from many different repositories, dozens of projects that I intermittently work on.  Many of these repositories depend on others,">
+    <meta property="og:url" content="http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/">
+    <meta property="article:published_time" content="2011-02-20T12:00:00.000Z">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="Altering Many Directories At Once With Cmddirs">
+    <meta name="twitter:description" content="On any machine I use I create a directory, sandbox, at the root of my home directory to hold checkouts of source code I'm working on.  This directory often contains code from many different repositories, dozens of projects that I intermittently work on.  Many of these repositories depend on others,">
+    <meta name="twitter:url" content="http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/">
+    <meta name="twitter:label1" content="Written by">
+    <meta name="twitter:data1" content="Drew Stephens">
+    
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Dinomite.net",
+        "logo": "http://localhost:2368/ghost/img/ghosticon.jpg"
+    },
+    "author": {
+        "@type": "Person",
+        "name": "Drew Stephens",
+        "image": {
+            "@type": "ImageObject",
+            "url": "//www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s=250&d=mm&r=x",
+            "width": 250,
+            "height": 250
+        },
+        "url": "http://localhost:2368/author/drew/",
+        "sameAs": []
+    },
+    "headline": "Altering Many Directories At Once With Cmddirs",
+    "url": "http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/",
+    "datePublished": "2011-02-20T12:00:00.000Z",
+    "description": "On any machine I use I create a directory, sandbox, at the root of my home directory to hold checkouts of source code I&#x27;m working on.  This directory often contains code from many different repositories, dozens of projects that I intermittently work on.  Many of these repositories depend on others,",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "http://localhost:2368"
+    }
+}
+    </script>
+
+    <meta name="generator" content="Ghost 0.11">
+    <link rel="alternate" type="application/rss+xml" title="Dinomite.net" href="../../../../rss/index.html">
+</head>
+<body class="post-template nav-closed">
+
+    <div class="nav">
+    <h3 class="nav-title">Menu</h3>
+    <a href="index.html#" class="nav-close">
+        <span class="hidden">Close</span>
+    </a>
+    <ul>
+            <li class="nav-home"><a href="../../../../">Home</a></li>
+    </ul>
+        <a class="subscribe-button icon-feed" href="../../../../rss/index.rss">Subscribe</a>
+</div>
+<span class="nav-cover"></span>
+
+
+    <div class="site-wrapper">
+
+        
+
+
+<header class="main-header post-head no-cover">
+    <nav class="main-nav  clearfix">
+        
+            <a class="menu-button icon-menu" href="index.html#"><span class="word">Menu</span></a>
+    </nav>
+</header>
+
+<main class="content" role="main">
+    <article class="post">
+
+        <header class="post-header">
+            <h1 class="post-title">Altering Many Directories At Once With Cmddirs</h1>
+            <section class="post-meta">
+                <time class="post-date" datetime="2011-02-20">20 February 2011</time> 
+            </section>
+        </header>
+
+        <section class="post-content">
+            <p>On any machine I use I create a directory, sandbox, at the root of my home directory to hold checkouts of source code I'm working on.  This directory often contains code from many different repositories, dozens of projects that I intermittently work on.  Many of these repositories depend on others, in particular Java submodules for <a href="http://clearspring.com/">Clearspring</a>, and I want to be able to easily update all of them at once.  With Subversion this is easy: the <code>svn</code> command allows you to act upon a checkout without being in the directory that contains it.  Simply issuing <code>svn up *</code> from <code>~/sandbox</code> ensures that I have the latest code revision in each of my checkouts and <code>svn st *</code> allows me to see if I have any uncommited changes.</p>
+
+<p>While I love Git, it does not make such actions this simple.  Git requires you to be in the repository directory (or set a number of environment variables) to work wit that repo.  While the <a href="http://superuser.com/questions/235455/bash-script-to-perform-an-action-on-each-subdirectory-in-a-directory"><code>-exec</code> option of <code>find(1)</code></a> allows me to descend into each directory and perform an action, I wanted to make this easy, because such all-checkout-actions are something that I want to do a number of times each day.  Like most problems, this one is (best?) solved with Perl.  Enter <a href="https://github.com/dinomite/CmdDirs">App::CmdDirs</a>.</p>
+
+<p><a href="https://github.com/dinomite/CmdDirs/raw/master/bin/cmddirs">CmdDirs</a> is a fairly simple Perl app that I have written to do what I describe above--descend into any number of directories and perform a command in each one.</p>
+
+<pre>titus:~/sandbox$ ls
+CmdAll                 mac-itunes             genius-os
+scoreboard             GAE                    hf
+uaParser               WebService-LOC-CongRec iTunes-Sync
+titus:~/sandbox$ cmddirs "git st"
+Performing `git st` in &lt;cmdall&gt;
+## master
+?? App-CmdDirs-1.00.tar.gz
+
+Performing `git st` in &lt;itunes-sync&gt;
+## master
+
+Performing `git st` in &lt;uaparser&gt;
+## master
+ M uaParser/test/test_user_agent.py
+
+Performing `git st` in &lt;webservice-loc-congrec&gt;
+## master
+</pre>
+
+<p>See the numerous directories? Note that there are 9 directories in my <code>sandbox</code> but <code>git st</code> was only performed in a few of them, those which are Git repositories.  CmdDirs has a modicum of intelligence: if it knows what your command is, the command will only be performed in applicable directories.  This can be overridden with <code>-all</code>, <code>-git</code>, or <code>-svn</code> doing what you expect.  Git and Subversion are the only two things supported right now, because that's all I have a need for. Writing new <a href="https://github.com/dinomite/CmdDirs/tree/master/lib/App/CmdDirs/Traverser">Traversers</a> is simple--just copy the form of git.pm or svn.pm.  You can probably Achieve at this endeavor even without knowing Perl.</p>
+
+<p>Here's a one-liner for installing <code>cmddirs</code>:</p>
+
+<pre>
+curl https://github.com/dinomite/CmdDirs/raw/master/bin/cmddirs &gt; ~/bin/cmddirs &amp;&amp; chmod a+x ~/bin/cmddirs
+</pre> 
+        </section>
+
+        <footer class="post-footer">
+
+
+            <figure class="author-image">
+                <a class="img" href="../../../../author/drew/" style="background-image: url(http://www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s&amp;)"><span class="hidden">Drew Stephens's Picture</span></a>
+            </figure>
+
+            <section class="author">
+                <h4><a href="../../../../author/drew/">Drew Stephens</a></h4>
+
+                    <p>Read <a href="../../../../author/drew/">more posts</a> by this author.</p>
+                <div class="author-meta">
+                    
+                    
+                </div>
+            </section>
+
+
+            <section class="share">
+                <h4>Share this post</h4>
+                <a class="icon-twitter" href="https://twitter.com/intent/tweet?text=Altering%20Many%20Directories%20At%20Once%20With%20Cmddirs&amp;url=http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/" onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+                    <span class="hidden">Twitter</span>
+                </a>
+                <a class="icon-facebook" href="https://www.facebook.com/sharer/sharer.php?u=http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/" onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+                    <span class="hidden">Facebook</span>
+                </a>
+                <a class="icon-google-plus" href="https://plus.google.com/share?url=http://localhost:2368/2011/02/20/altering-many-directories-at-once-with-cmddirs/" onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+                    <span class="hidden">Google+</span>
+                </a>
+            </section>
+
+
+        </footer>
+
+    </article>
+</main>
+
+<aside class="read-next">
+    <a class="read-next-story no-cover" href="../../../03/07/paleo-egg-muffins/">
+        <section class="post">
+            <h2>Paleo Egg Muffins</h2>
+            <p>There are a number of recipes for paleo muffins, which are a great way to get fast paleo food…</p>
+        </section>
+    </a>
+    <a class="read-next-story prev no-cover" href="http://localhost:2368/2010/12/16/crapcan-racing-tips/">
+        <section class="post">
+            <h2>Crapcan Racing Tips</h2>
+            <p>Drivers' schools are incredibly fun and the best way to improve your driving prowess.  Track days can be incredibly…</p>
+        </section>
+    </a>
+</aside>
+
+
+
+        <footer class="site-footer clearfix">
+            <section class="copyright"><a href="../../../../">Dinomite.net</a> © 2017</section>
+            <section class="poweredby">Proudly published with <a href="https://ghost.org">Ghost</a></section>
+        </footer>
+
+    </div>
+
+    <script type="text/javascript" src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
+    
+    <script type="text/javascript" src="../../../../assets/js/jquery.fitvids.js?v=830db2c5c6"></script>
+    <script type="text/javascript" src="../../../../assets/js/index.js?v=830db2c5c6"></script>
+
+</body>

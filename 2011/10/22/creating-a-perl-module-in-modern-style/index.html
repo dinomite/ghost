@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+
+    <title>Creating a Perl Module In Modern Style</title>
+    <meta name="description" content="" />
+
+    <meta name="HandheldFriendly" content="True" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <link rel="shortcut icon" href="../../../../favicon.ico">
+
+    <link rel="stylesheet" type="text/css" href="http://fonts.googleapis.com/css?family=Merriweather:300,700,700italic,300italic|Open+Sans:700,400" />
+    <link rel="stylesheet" type="text/css" href="../../../../assets/css/screen.css?v=830db2c5c6" />
+
+
+    <link rel="canonical" href="index.html" />
+    <meta name="referrer" content="no-referrer-when-downgrade" />
+    <link rel="amphtml" href="amp/index.html" />
+    
+    <meta property="og:site_name" content="Dinomite.net" />
+    <meta property="og:type" content="article" />
+    <meta property="og:title" content="Creating a Perl Module In Modern Style" />
+    <meta property="og:description" content="One of the very best things about Perl is CPAN, a repository of modules to do everything from browse the web to manipulating image files.  CPAN provides a consistent method for installing modules (install cpanminus and then cpanm &amp;lt;Module::Name&amp;gt;) and the largest number of modules of all" />
+    <meta property="og:url" content="http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/" />
+    <meta property="article:published_time" content="2011-10-22T12:00:00.000Z" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Creating a Perl Module In Modern Style" />
+    <meta name="twitter:description" content="One of the very best things about Perl is CPAN, a repository of modules to do everything from browse the web to manipulating image files.  CPAN provides a consistent method for installing modules (install cpanminus and then cpanm &amp;lt;Module::Name&amp;gt;) and the largest number of modules of all" />
+    <meta name="twitter:url" content="http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/" />
+    <meta name="twitter:label1" content="Written by" />
+    <meta name="twitter:data1" content="Drew Stephens" />
+    
+    <script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Article",
+    "publisher": {
+        "@type": "Organization",
+        "name": "Dinomite.net",
+        "logo": "http://localhost:2368/ghost/img/ghosticon.jpg"
+    },
+    "author": {
+        "@type": "Person",
+        "name": "Drew Stephens",
+        "image": {
+            "@type": "ImageObject",
+            "url": "//www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s=250&d=mm&r=x",
+            "width": 250,
+            "height": 250
+        },
+        "url": "http://localhost:2368/author/drew/",
+        "sameAs": []
+    },
+    "headline": "Creating a Perl Module In Modern Style",
+    "url": "http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/",
+    "datePublished": "2011-10-22T12:00:00.000Z",
+    "description": "One of the very best things about Perl is CPAN, a repository of modules to do everything from browse the web to manipulating image files.  CPAN provides a consistent method for installing modules (install cpanminus and then cpanm &amp;lt;Module::Name&amp;gt;) and the largest number of modules of all",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "http://localhost:2368"
+    }
+}
+    </script>
+
+    <meta name="generator" content="Ghost 0.11" />
+    <link rel="alternate" type="application/rss+xml" title="Dinomite.net" href="../../../../rss/index.html" />
+</head>
+<body class="post-template nav-closed">
+
+    <div class="nav">
+    <h3 class="nav-title">Menu</h3>
+    <a href="index.html#" class="nav-close">
+        <span class="hidden">Close</span>
+    </a>
+    <ul>
+            <li class="nav-home"><a href="../../../../index.html">Home</a></li>
+    </ul>
+        <a class="subscribe-button icon-feed" href="../../../../rss/index.html">Subscribe</a>
+</div>
+<span class="nav-cover"></span>
+
+
+    <div class="site-wrapper">
+
+        
+
+
+<header class="main-header post-head no-cover">
+    <nav class="main-nav  clearfix">
+        
+            <a class="menu-button icon-menu" href="index.html#"><span class="word">Menu</span></a>
+    </nav>
+</header>
+
+<main class="content" role="main">
+    <article class="post">
+
+        <header class="post-header">
+            <h1 class="post-title">Creating a Perl Module In Modern Style</h1>
+            <section class="post-meta">
+                <time class="post-date" datetime="2011-10-22">22 October 2011</time> 
+            </section>
+        </header>
+
+        <section class="post-content">
+            <p>One of the very best things about Perl is <a href="https://metacpan.org/">CPAN</a>, a repository of modules to do everything from <a href="https://metacpan.org/module/WWW::Mechanize">browse the web</a> to <a href="https://metacpan.org/module/Image::Magick">manipulating image files</a>.  CPAN provides a consistent method for installing modules (<a href="https://metacpan.org/module/App::cpanminus#Installing-to-system-perl">install cpanminus</a> and then <code>cpanm &lt;Module::Name&gt;</code>) and the largest number of modules of all the scripting languages.  More often than not, what you are trying to do has already been done and exists as a CPAN module.  In the event you are doing something new, the best way to give back to the community and get free help is to encapsulate your work and distribute it as a module on CPAN.</p>
+
+<p>Historically, creating a module suitable for general consumption was a confusing.  Tutorials <a href="http://world.std.com/~swmcd/steven/perl/module_mechanics.html">from years past</a> abound, <a href="http://www.perlmonks.org/?node_id=431702">each one longer</a> <a href="http://members.pcug.org.au/~rcook/PerlModule_HOWTO.html">than the previous</a>, and <a href="http://mathforum.org/~ken/perl_modules.html">always employing a different toolchain</a>, making synthesis of common concepts impossible.  These days, however, things are much easier.  In the past 6 years or so the Perl community has tried on a <a href="https://metacpan.org/module/ExtUtils::MakeMaker">number</a> of <a href="https://metacpan.org/module/Module::Build">methods</a> for <a href="https://metacpan.org/module/Module::Install">building</a> modules.  The focus of this article will be a recent (circa late 2009...the Perl ecosystem takes a measured pace) build system, <a href="https://metacpan.org/module/Dist::Zilla">Dist::Zilla</a>.</p>
+
+<p>Whereas <a href="https://metacpan.org/module/ExtUtils::MakeMaker">ExtUtils::MakeMaker</a> and <a href="https://metacpan.org/module/Module::Build">Module::Build</a> are systems for building, testing, and installing a release, Dist::Zilla sits at a higher level.  With Dist::Zilla, you create a single file that controls the build &amp; test flow (using <a href="https://metacpan.org/module/Dist::Zilla::Plugin::MakeMaker">ExtUtils::MakeMaker</a> under the hood) but also provide functionality for generating semi-boilerplate files (LICENSE, MANIFEST, META.yml) and releasing the code via CPAN.  The configuration file, <code>dist.ini</code>, is easy-to-read and short in contrast to prior build systems.</p>
+
+<p>To start using Dist::Zilla, install it using the standard CPAN shell command (<code>cpan -i Dist::Zilla</code>) or with cpanminus (<code>cpanm Dist::Zilla</code>).  You utilize Dist::Zilla through the command <code>dzil</code>; if that's not in your path (<code>which dzil</code>), then you'll want to find it and symlink it somewhere useful or add it to your path.  Global setup of dzil is done by invoking <code>dzil setup</code> and answering the questions it poses.  With that done you can very easily mint a new distribution:</p>
+
+<pre><code class="language-perl">Titus:~/sandbox$ dzil new Number::Cruncher  
+[DZ] making target dir /Users/dinomite/Dropbox/sandbox/Number-Cruncher
+[DZ] writing files to /Users/dinomite/Dropbox/sandbox/Number-Cruncher
+[DZ] dist minted in ./Number-Cruncher
+</code></pre>
+
+<p>In the newly created Number-Cruncher directory you'll find a <code>lib</code> directory containing <code>Number/Cruncher.pm</code> and a <code>dist.ini</code> <br />
+:</p>
+
+<pre><code class="language-perl">name    = Number-Cruncher  
+author  = Drew Stephens [drew@dinomite.net]  
+license = Perl_5  
+copyright_holder = Drew Stephens  
+copyright_year   = 2011
+
+version = 0.001
+
+[@Basic]
+</code></pre>
+
+<p>At this point, code and tests are the only things needed to have a Perl module.  Here's some simple code for <code>lib/Number/Cruncher.pm</code>:</p>
+
+<pre><code class="language-perl">use strict;  
+use warnings;  
+package Number::Cruncher;
+
+=head1 NAME
+
+Number::Cruncher - crunch numbers
+
+=cut
+
+sub new {  
+    my $class = shift;
+    my $self = {
+        first =&gt; shift,
+        second =&gt; shift,
+    };
+    bless $self, $class;
+    return $self;
+}
+
+sub crunch {  
+    my $self = shift;
+    return $self-&gt;{first} + $self-&gt;{second};
+}
+
+1;  
+</code></pre>
+
+<p>And the associated test file that I created, <code>t/number-cruncher.t</code>:</p>
+
+<pre><code class="language-perl">#!/usr/bin/env perl
+use strict;  
+use warnings;
+
+use Test::More tests =&gt; 2;
+
+BEGIN { use_ok 'Number::Cruncher'; }
+
+my $first = 1;  
+my $second = 7;  
+my $cruncher = Number::Cruncher-&gt;new($first, $second);  
+ok (($first + $second) == $cruncher-&gt;crunch());  
+</code></pre>
+
+<p>In three files--<code>dist.ini</code>, <code>lib/Number/Cruncher.pm</code>, and <code>t/number-cruncher.t</code>--we have a module.  Run the test with <code>dzil test</code> and you'll see Dist::Zilla build your module into a temporary directory and run the test suite from there:</p>
+
+<pre><code class="language-sh">Titus:~/sandbox/Number-Cruncher$ dzil test  
+[DZ] building test distribution under .build/mgJsQhkFi6
+[DZ] beginning to build Number-Cruncher
+[DZ] guessing dist's main_module is lib/Number/Cruncher.pm
+[DZ] extracting distribution abstract from lib/Number/Cruncher.pm
+[DZ] writing Number-Cruncher in .build/mgJsQhkFi6
+Checking if your kit is complete...  
+Looks good  
+Writing Makefile for Number::Cruncher  
+cp lib/Number/Cruncher.pm blib/lib/Number/Cruncher.pm  
+Manifying blib/man3/Number::Cruncher.3  
+PERL_DL_NONLAZY=1 /usr/local/Cellar/perl/5.12.3/bin/perl "-MExtUtils::Command::MM" "-e" "test_harness(0, 'blib/lib', 'blib/arch')" t/*.t  
+t/number-cruncher.t .. ok  
+All tests successful.  
+Files=1, Tests=2,  0 wallclock secs ( 0.02 usr  0.01 sys +  0.02 cusr  0.00 csys =  0.05 CPU)  
+Result: PASS  
+[DZ] all's well; removing .build/mgJsQhkFi6
+</code></pre>
+
+<p>To build a distributable tarball, just run <code>dzil build</code>:</p>
+
+<pre><code class="language-sh">Titus:~/sandbox/Number-Cruncher$ dzil build  
+[DZ] beginning to build Number-Cruncher
+[DZ] guessing dist's main_module is lib/Number/Cruncher.pm
+[DZ] extracting distribution abstract from lib/Number/Cruncher.pm
+[DZ] writing Number-Cruncher in Number-Cruncher-0.001
+[DZ] building archive with Archive::Tar::Wrapper
+[DZ] writing archive to Number-Cruncher-0.001.tar.gz
+Titus:~/sandbox/Number-Cruncher$ ls Number-Cruncher-0.001*  
+Number-Cruncher-0.001.tar.gz
+
+Number-Cruncher-0.001:  
+LICENSE     META.yml    README      lib  
+MANIFEST    Makefile.PL dist.ini    t  
+</code></pre>
+
+<p>If you already have a PAUSE account, you can use <code>dzil release</code> to upload that tarball to PAUSE for inclusion in CPAN.  If you haven't authored a Perl module before, <a href="http://pause.perl.org/pause/query?ACTION=request_id">request an account</a> for uploading modules to CPAN.  With PAUSE and Dist::Zilla, creating widely-available Perl modules is easy.</p>
+
+<h2 id="seealso">See Also</h2>
+
+<ul>
+<li><a href="http://dzil.org">dzil.org</a></li>
+<li><a href="https://metacpan.org/module/Dist::Zilla::Tutorial">Dist::Zilla::Tutorial</a></li>
+<li><a href="https://metacpan.org/release/Shell-Verbose">Shell::Verbose</a>, my first Dist::Zilla-powered module </li>
+</ul>
+
+<p><br /> </p>
+        </section>
+
+        <footer class="post-footer">
+
+
+            <figure class="author-image">
+                <a class="img" href="../../../../author/drew/index.html" style="background-image: url(http://www.gravatar.com/avatar/d1ed8a9e71adc2b356cfc4e020e0dd0f?s&)"><span class="hidden">Drew Stephens's Picture</span></a>
+            </figure>
+
+            <section class="author">
+                <h4><a href="../../../../author/drew/index.html">Drew Stephens</a></h4>
+
+                    <p>Read <a href="../../../../author/drew/index.html">more posts</a> by this author.</p>
+                <div class="author-meta">
+                    
+                    
+                </div>
+            </section>
+
+
+            <section class="share">
+                <h4>Share this post</h4>
+                <a class="icon-twitter" href="https://twitter.com/intent/tweet?text=Creating%20a%20Perl%20Module%20In%20Modern%20Style&amp;url=http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/"
+                    onclick="window.open(this.href, 'twitter-share', 'width=550,height=235');return false;">
+                    <span class="hidden">Twitter</span>
+                </a>
+                <a class="icon-facebook" href="https://www.facebook.com/sharer/sharer.php?u=http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/"
+                    onclick="window.open(this.href, 'facebook-share','width=580,height=296');return false;">
+                    <span class="hidden">Facebook</span>
+                </a>
+                <a class="icon-google-plus" href="https://plus.google.com/share?url=http://localhost:2368/2011/10/22/creating-a-perl-module-in-modern-style/"
+                   onclick="window.open(this.href, 'google-plus-share', 'width=490,height=530');return false;">
+                    <span class="hidden">Google+</span>
+                </a>
+            </section>
+
+
+        </footer>
+
+    </article>
+</main>
+
+<aside class="read-next">
+    <a class="read-next-story no-cover" href="../../26/perl-and-dubstep/index.html">
+        <section class="post">
+            <h2>Perl And Dubstep</h2>
+            <p>In the past year, I have come to quite like dubstep, a burgeoning electronic music genre.  Perhaps this is&hellip;</p>
+        </section>
+    </a>
+    <a class="read-next-story prev no-cover" href="../../../05/22/rafter-pull-up-bar/index.html">
+        <section class="post">
+            <h2>Rafter Pull Up Bar</h2>
+            <p>I quite enjoy exercising and, ever since I did parkour, I've really liked body weight movements. I don't do&hellip;</p>
+        </section>
+    </a>
+</aside>
+
+
+
+        <footer class="site-footer clearfix">
+            <section class="copyright"><a href="../../../../index.html">Dinomite.net</a> &copy; 2017</section>
+            <section class="poweredby">Proudly published with <a href="https://ghost.org">Ghost</a></section>
+        </footer>
+
+    </div>
+
+    <script type="text/javascript" src="http://code.jquery.com/jquery-1.12.0.min.js"></script>
+    
+    <script type="text/javascript" src="../../../../assets/js/jquery.fitvids.js?v=830db2c5c6"></script>
+    <script type="text/javascript" src="../../../../assets/js/index.js?v=830db2c5c6"></script>
+
+</body>
+</html>

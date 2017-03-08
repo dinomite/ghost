@@ -1,0 +1,754 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title><![CDATA[Dinomite.net]]></title><description><![CDATA[Technology, dogs, and etc.]]></description><link>http://localhost:2368/</link><generator>Ghost 0.11</generator><lastBuildDate>Wed, 08 Mar 2017 00:31:26 GMT</lastBuildDate><atom:link href="http://localhost:2368/rss/" rel="self" type="application/rss+xml"/><ttl>60</ttl><item><title><![CDATA[Jdbi Tips]]></title><description><![CDATA[<p>I've been using <a href="http://jdbi.org/">JDBI</a> in Java &amp; <a href="https://kotlinlang.org/">Kotlin</a> projects recently and have come across a few things that aren't entirely intuitive.  If you're having trouble with JDBI, be sure to check <a href="http://jdbi.org/archive.html">the docs</a>; if you don't find an answer there, the <a href="https://github.com/jdbi/jdbi/issues">issues on GitHub</a> is a great place to look</p>]]></description><link>http://localhost:2368/2017/01/19/jdbi-tips/</link><guid isPermaLink="false">ad6f40eb-5f1d-42e8-b66a-c9367901dd18</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Thu, 19 Jan 2017 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>I've been using <a href="http://jdbi.org/">JDBI</a> in Java &amp; <a href="https://kotlinlang.org/">Kotlin</a> projects recently and have come across a few things that aren't entirely intuitive.  If you're having trouble with JDBI, be sure to check <a href="http://jdbi.org/archive.html">the docs</a>; if you don't find an answer there, the <a href="https://github.com/jdbi/jdbi/issues">issues on GitHub</a> is a great place to look for more esoteric uses of the library.</p>
+
+<h1 id="guice">Guice</h1>
+
+<p>I have a Dropwizard app that I use with Guice via <a href="https://github.com/xvik/dropwizard-guicey">dropwizard-guicey</a>.  While the <a href="http://www.dropwizard.io/1.0.0/docs/manual/jdbi.html">Dropwizard docs</a> cover using JDBI, constructing instances is a bit different with dropwizard-guicey.  My (Kotlin) module for registering DAOs looks like this:</p>
+
+<pre><code class="language-java">class DaoModule : DropwizardAwareModule&lt;AppConfiguration&gt;() {  
+    override fun configure() {
+        val factory = AppDBIFactory()
+        val dataSourceFactory = configuration().dataSourceFactory
+        val jdbi = factory.build(environment(), dataSourceFactory, "postgresql")
+        jdbi.registerArgumentFactory(PgIntegerArrayArgFactory())
+        bind(DBI::class.java).toInstance(jdbi)
+
+        val apiKeyDao = jdbi.onDemand(ApiKeyDao::class.java)
+        bind(ApiKeyDao::class.java).toInstance(apiKeyDao)
+    }
+}
+
+class AppDBIFactory : DBIFactory() {  
+    override fun databaseTimeZone(): Optional&lt;TimeZone&gt;? {
+        return Optional.of(TimeZone.getTimeZone("UTC"))
+    }
+}
+</code></pre>
+
+<p>More on the <code>PgIntegerArrayArgFactory</code> below.</p>
+
+<h1 id="queryingenums">Querying Enums</h1>
+
+<p>JDBI's default binding of <code>enum</code> arguments <a href="https://github.com/jdbi/jdbi/blob/292b089cfd4e6a6f5f41c9bd320bade1f66926da/src/main/java/org/skife/jdbi/v2/EnumArgument.java#L37">calls <code>.name()</code></a> on the enum object.  I have enums that instead use the ordinal value in a numeric database column, so I need the binding to call <code>.ordinal()</code> instead.  To accomplish this, I create a special binding factory, which looks a bit nasty, but it's actual action is quite straighforward:</p>
+
+<pre><code class="language-java">@BindingAnnotation(BindStatus.StatusBinderFactory.class)
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.PARAMETER})
+public @interface BindWidgetStatus {  
+    class StatusBinderFactory implements BinderFactory {
+        public Binder build(Annotation annotation) {
+            return new Binder&lt;BindStatus, Status&gt;() {
+                public void bind(SQLStatement q, BindStatus bind, Status arg) {
+                    q.bind("status", arg.ordinal());
+                }
+            };
+        }
+    }
+}
+</code></pre>
+
+<p>The operative part is down in the deepest indentation—bind the ordinal value of the enum to whatever you will use as the placeholder string in the query.  Then, in the DAO:</p>
+
+<pre><code class="language-java">@RegisterMapper(WidgetMapper::class)
+interface WidgetDao {  
+    @SqlQuery("SELECT * FROM widgets WHERE status = :status ")
+    fun getWidgets(@BindWidgetStatus status: Widget.Status): List&lt;Widget&gt;
+}
+</code></pre>
+
+<p>Be sure to use the same placeholder string as in the <code>BinderFactory</code> above (in this case <code>status</code>).</p>
+
+<h1 id="arrayarguments">Array arguments</h1>
+
+<p>Sometimes I want to be able to select widgets in any <code>Status</code>.  In SQL, I would use an <code>IN</code> clause: "<code>...WHERE status IN (0, 1, 2)</code>" and, with a bit more setup JDBI can do the same.  First, the enum in question:</p>
+
+<pre><code class="language-java">data class Widget(val id: Int, val status: Status) {  
+    enum class Status {
+        UNREAD, READ, ALL;
+
+        fun queryValue(): Array&lt;Int&gt; {
+            if (this == ALL) {
+                return arrayOf(UNREAD.ordinal, READ.ordinal)
+            }
+
+            return arrayOf(this.ordinal)
+        }
+    }
+}
+</code></pre>
+
+<p>And change the <code>Binder</code> to use the <code>queryValue()</code> method:</p>
+
+<pre><code class="language-java">@BindingAnnotation(BindStatus.StatusBinderFactory.class)
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.PARAMETER})
+public @interface BindWidgetStatus {  
+    class StatusBinderFactory implements BinderFactory {
+        public Binder build(Annotation annotation) {
+            return new Binder&lt;BindStatus, Status&gt;() {
+                public void bind(SQLStatement q, BindStatus bind, Status arg) {
+                    q.bind("status", SqlArray.arrayOf(Integer.class, arg.queryValue()));
+                }
+            };
+        }
+    }
+}
+</code></pre>
+
+<p>That <code>SqlArray</code> is a just a POJO for holding the things to be bound:</p>
+
+<pre><code class="language-java">class SqlArray&lt;T&gt; {  
+    private final Object[] elements;
+    private final Class&lt;T&gt; type;
+
+    private SqlArray(Class&lt;T&gt; type, Collection&lt;T&gt; elements) {
+        this.elements = Iterables.toArray(elements, Object.class);
+        this.type = type;
+    }
+
+    @SafeVarargs
+    static &lt;T&gt; SqlArray&lt;T&gt; arrayOf(Class&lt;T&gt; type, T... elements) {
+        return new SqlArray&lt;&gt;(type, asList(elements));
+    }
+
+    Object[] getElements() {
+        return elements;
+    }
+
+    Class&lt;T&gt; getType() {
+        return type;
+    }
+}
+</code></pre>
+
+<p>Finally, also in Java, an <code>ArgumentFactory</code> to bind the SqlArray values:</p>
+
+<pre><code class="language-java">public class PgIntegerArrayArgFactory implements ArgumentFactory&lt;SqlArray&lt;Integer&gt;&gt; {  
+    public boolean accepts(Class&lt;?&gt; type, Object value, StatementContext ctx) {
+        return value instanceof SqlArray
+            &amp;&amp; ((SqlArray)value).getType().isAssignableFrom(Integer.class);
+    }
+
+    public Argument build(Class&lt;?&gt; type,
+                          final SqlArray&lt;Integer&gt; value,
+                          StatementContext ctx) {
+        return (position, statement, ctx1) -&gt; {
+            Array ary = ctx1.getConnection()
+                            .createArrayOf("integer", value.getElements());
+            statement.setArray(position, ary);
+        };
+    }
+}
+</code></pre>
+
+<p>This is described more thoroughly on <a href="http://skife.org/jdbi/java/2011/12/21/jdbi_in_clauses.html">Brian McCallister's blog</a>.  Note that he calls the above <code>ArgumentFactory</code> a toy, since it only binds one type (Integers).  Since I only use integer array arguments so far, I've left it as such.</p>
+
+<h1 id="optionalarguments">Optional arguments</h1>
+
+<p>Sometimes you want to have optional arguments in a DAO method, like an ID to start selecting records at. JDBI supports this, but in a non-intuitive way—you simply write the <code>@SqlQuery</code> to expect a possibly null value:</p>
+
+<pre><code class="language-java">    @SqlQuery("SELECT * FROM widgets " +
+              "WHERE (cast(:start_id AS INT) IS NULL OR c1.id &lt;= :start_id)")
+    fun widgets(@Bind("start_id") startId: Int?): List&lt;Widget&gt;
+</code></pre>
+
+<p>Since this is written in Kotlin, you can see that startId is nullable.  If it is null the SQL query will ignore it (the <code>where</code> clause is always true).  More details <a href="https://github.com/jdbi/jdbi/issues/381">here</a>.</p>]]></content:encoded></item><item><title><![CDATA[Diy Stretch Webbing Leash a La Ruffwear Roamer]]></title><description><![CDATA[<p><a href="https://www.flickr.com/photos/dinomite/29049432104/in/album-72157675204681913/"><img src="https://farm9.staticflickr.com/8301/29049432104_dcfa623b0b_z_d.jpg" alt="Materials" title=""></a></p>
+
+<p>The <a href="https://www.amazon.com/Ruffwear-Roamer-Leash-Large-Obsidian/dp/B00HE4Y4RK/ref=as_li_ss_il?ie=UTF8&amp;qid=1473815307&amp;sr=8-1&amp;keywords=ruffwear+roamer&amp;linkCode=li2&amp;tag=dinomitenet-20&amp;linkId=fc8e0acc8fe28c14d2fcfcbb638bf137">Ruffwear® Roamer™</a> leash is wonderful for running and great for anytime when you have an enthusiastic dog who pulls or lurches after prey.  The leash is made of tubular webbing with elastic down the center that keeps the length manageable while also softening the blows from your leash partner.</p>]]></description><link>http://localhost:2368/2016/09/23/diy-stretch-webbing-leash-a-la-ruffwear-roamer/</link><guid isPermaLink="false">11db9096-2e5a-4311-bd58-facedb2b071b</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Fri, 23 Sep 2016 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><a href="https://www.flickr.com/photos/dinomite/29049432104/in/album-72157675204681913/"><img src="https://farm9.staticflickr.com/8301/29049432104_dcfa623b0b_z_d.jpg" alt="Materials" title=""></a></p>
+
+<p>The <a href="https://www.amazon.com/Ruffwear-Roamer-Leash-Large-Obsidian/dp/B00HE4Y4RK/ref=as_li_ss_il?ie=UTF8&amp;qid=1473815307&amp;sr=8-1&amp;keywords=ruffwear+roamer&amp;linkCode=li2&amp;tag=dinomitenet-20&amp;linkId=fc8e0acc8fe28c14d2fcfcbb638bf137">Ruffwear® Roamer™</a> leash is wonderful for running and great for anytime when you have an enthusiastic dog who pulls or lurches after prey.  The leash is made of tubular webbing with elastic down the center that keeps the length manageable while also softening the blows from your leash partner.  Unfortunately, it isn't very durable and the tension of the elastic is insufficient for strong dogs.  My beagle-terrier-thing is only 30 pounds but is very strong and easily exceeded the Roamer™'s elastic, defeating much of the leash's purpose.  I figured I could do better.</p>
+
+<h1 id="materials">Materials</h1>
+
+<p>In order to make a 6-8 foot leash, depending upon whether you're wearing it as a belt or not, I started with a 10 foot length of <a href="https://www.amazon.com/BlueWater-Ropes-Climb-Spec%C2%AE-Webbing-Black/dp/B004AGOHT0/ref=as_li_ss_il?ie=UTF8&amp;qid=1473815452&amp;sr=8-1&amp;keywords=tubular+webbing&amp;linkCode=li2&amp;tag=dinomitenet-20&amp;linkId=89ba46ef5b0db13cedc54214709d81ab">one inch wide tubular webbing</a>.  I used <a href="https://www.amazon.com/TheraBand-Professional-Resistance-Exercise-Conditioning/dp/B00066D654/ref=as_li_ss_il?ie=UTF8&amp;qid=1473815413&amp;sr=8-1&amp;keywords=thera-band+tubing+special+heavy&amp;linkCode=li2&amp;tag=dinomitenet-20&amp;linkId=4bbc12c473e8108df5d3fa6c7b50524a">Thera-Band surgical tubing</a> in the black "Special Heavy" strength, which provides ample resistance for very strong medium dogs and fits well down the center of one inch webbing.  Use 40% as much surgical tubing as the stretch portion of your leash—in my case the stretch portion is 6½ feet (78 inches) so the lease has 32 inches of tubular webbing.</p>
+
+<p>For the handle, a <a href="https://www.amazon.com/10-Adjustable-Release-Plastic-Buckles/dp/B00DCZRLZW/ref=as_li_ss_tl?ie=UTF8&amp;qid=1473815767&amp;sr=8-3&amp;keywords=1+inch+side+release+buckle&amp;linkCode=ll1&amp;tag=dinomitenet-20&amp;linkId=131e0096cc6f7c63b13d116703446a45">side-release buckle</a> allows you to use the leash both with a normal handle and as a belt.  If you don't care about being able to belt the leash, you could omit this and simply make a loop handle.  I've had too many clips that open when the dog charges into a bush, so I use an <a href="https://www.amazon.com/Camp-5118103-Orbit-Twist-Carabiner/dp/B00372AVQ6/ref=as_li_ss_tl?ie=UTF8&amp;qid=1473815910&amp;sr=8-4&amp;keywords=locking+carabiner+automatic&amp;linkCode=ll1&amp;tag=dinomitenet-20&amp;linkId=c1772c822ed001e688afa5703ffcff25">automatic locking carabiner</a> for the dog end of the leash.</p>
+
+<h1 id="tools">Tools</h1>
+
+<ul>
+<li><a href="https://www.amazon.com/COATS-CLARK-Heavy-Thread-125-Yard/dp/B001MUFKNE/ref=as_li_ss_tl?ie=UTF8&amp;qid=1473816090&amp;sr=8-1&amp;keywords=heavy+duty+thread&amp;linkCode=ll1&amp;tag=dinomitenet-20&amp;linkId=51227a186ffe12d2493a05738ef348dd">Heavy duty thread</a></li>
+<li><a href="https://www.amazon.com/Singer-Assorted-Hand-Needles-45-Count/dp/B002PI751C/ref=as_li_ss_tl?ie=UTF8&amp;qid=1473816125&amp;sr=8-1&amp;keywords=sewing+needles&amp;linkCode=ll1&amp;tag=dinomitenet-20&amp;linkId=2f4964461ba833be8c916f1499a3619f">Sewing needle</a></li>
+<li>Scissors</li>
+<li>Lighter or matches</li>
+<li>1/4 inch by 2-3 foot long metal rod</li>
+<li>Binder clips</li>
+</ul>
+
+<h1 id="construction">Construction</h1>
+
+<p><a href="https://www.flickr.com/photos/dinomite/29594543561/in/album-72157675204681913/"><img src="https://farm9.staticflickr.com/8186/29594543561_d7c4a4caa5_m_d.jpg" alt="Threading" title=""></a></p>
+
+<p>Getting the slack surgical tubing threaded through the webbing, with 2.5 times as much webbing bunched up along its length, was the most difficult part conceptually, but after some trial and error I came up with a very easy solution.  I found a ¼" metal rod that fit very tightly into the surgical tubing's center.  Forcing an inch worth of the tubing down over the rod makes for enough friction that you can apply quite a lot of force and stretch the surgical tubing wihtout it coming free.</p>
+
+<p>With this odd arrangment setup, begin by threading the dog-end of the tubular webbing over the metal rod, and keep threading until it meets up with the open end of the surgical tubing.  When those ends are lined up, secure the elastic inside of the webbing with a binder clip.  Then, it's just a process of stretching the surgical tubing and feeding more webbing over the rod and onto the tubing with it taught.  I fed 6½ feet of webbing onto my 32 inches of webbing, leaving the remaining 3½ feet of webbing for constructing the handle.</p>
+
+<p>Once you have all of the webbing you want bunched up on the surgical tubing, grip the tubing through the webbing near where the rod is attached to the surgical tubing very tightly and pull the rod straight out of the surgical tubing.  Now it's time to sew.</p>
+
+<p><a href="https://www.flickr.com/photos/dinomite/29385052030/in/album-72157675204681913/"><img src="https://farm9.staticflickr.com/8295/29385052030_38b1662bba_z_d.jpg" alt="Binding the surgical tubing" title=""></a></p>
+
+<p>Sewing is the other important technique of this project.  The surgical tubing, like most elastomers, doesn't respond well to being cut or punctured, so it is important to avoid sending the needle through it whilst sewing.  In order to keep the surgical tubing in place the technique I have settled on is crimping it tightly.  Fold over the last inch of surgical tubing, and the webbing it is within, back onto itself.  Secure the fold with a binder clip and then sew either side of the webbing tightly together about ¼ inch from the end of the tubing.  Follow this with some stiches across the webbing.  Remove hte binder clip and repeat near the folded end of the joint.</p>
+
+<p>See the <a href="https://www.flickr.com/photos/dinomite/sets/72157675204681913">Flickr album</a> for more construction details.</p>]]></content:encoded></item><item><title><![CDATA[Optional Authentication With Dropwizard]]></title><description><![CDATA[<p><a href="http://dropwizard.io">Dropwizard</a> provides a great framework for authentication &amp; authorization.  <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/Authenticator.html"><code>Authenticator</code></a>s do what their name implies, returning a <a href="http://docs.oracle.com/javase/7/docs/api/java/security/Principal.html?is-external=true"><code>Principal</code></a> (probably your <code>User</code> object) that servlets can use for building responses.  The <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/Authorizer.html"><code>Authorizer</code></a> interface has a single methoed, <code>authorize()</code>, which takes a <code>Principal</code> and a string role to authorize access for.</p>]]></description><link>http://localhost:2368/2016/05/18/optional-authentication-with-dropwizard/</link><guid isPermaLink="false">2bc3923e-7904-47c8-b552-2d632efd4ef2</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Wed, 18 May 2016 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><a href="http://dropwizard.io">Dropwizard</a> provides a great framework for authentication &amp; authorization.  <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/Authenticator.html"><code>Authenticator</code></a>s do what their name implies, returning a <a href="http://docs.oracle.com/javase/7/docs/api/java/security/Principal.html?is-external=true"><code>Principal</code></a> (probably your <code>User</code> object) that servlets can use for building responses.  The <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/Authorizer.html"><code>Authorizer</code></a> interface has a single methoed, <code>authorize()</code>, which takes a <code>Principal</code> and a string role to authorize access for.  These get wrapped in an <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/AuthFilter.html"><code>AuthFilter</code></a> which extracts credentials from the requst and passed on to the <code>Authenticator</code>.</p>
+
+<p>With the authen &amp; authz classes in place protecting resources is easy: you simply annotate them with one of <code>@PermitAll</code>, <code>@RolesAllowed</code>, or <code>@DenyAll</code>.  The last one does exactly what it says on the tin.  A specific role or set of roles can be permitted access with the <code>@RolesAllowed</code> annotation, to which you pass a <code>String</code> or <code>String[]</code> of roles.  <code>@PermitAll</code> allows any <em>authenticated</em> user to access the resource.  What is missing here is an annotation to allow optionally authenticated resources—allowing you to customize a response for a known user but deliver a generic response to anonymous visitors.</p>
+
+<h1 id="optionallyprotectedresources">Optionally protected resources</h1>
+
+<p>The Dropwizard manual gives a <a href="http://www.dropwizard.io/0.9.2/docs/manual/auth.html#protecting-resources">cursory explanation</a> of how to implement optional authentication:</p>
+
+<p><tt> <br>
+If you have a resource which is optionally protected (e.g., you want to display a logged-in user’s name but not require login), you need to implement a custom filter which injects a security context containing the principal if it exists, without performing authentication. <br>
+</tt></p>
+
+<p>The process for optional resources involves two <code>AuthFilter</code>s: one to check &amp; process credentials for a logged-in user and a second that provides a default user.  These can be hit in turn with a <a href="http://www.dropwizard.io/0.9.2/dropwizard-auth/apidocs/io/dropwizard/auth/chained/ChainedAuthFilter.html"><code>ChainedAuthFilter</code></a>.</p>
+
+<p>I'll show the important parts of how I accomplished this with code examples written in a mix of Java and <a href="https://kotlinlang.org/">Kotlin</a>.</p>
+
+<h1 id="wiring">Wiring</h1>
+
+<p>Setting up Dropwizard's authentication involves creating an <code>AuthFilter</code> to which you pass the <code>Authenticator</code> and <code>Authorizer</code> that it will use.  Creating a <code>ChainedAuthFilter</code> is easy, just pass a <code>List&lt;AuthFilter&gt;</code> with the filters in the order they should be executed.  Dropwizard tries each of the <code>AuthFilter</code>s in turn until one returns successfully.</p>
+
+<p>In the application's <code>run()</code> method:</p>
+
+<pre><code class="language-java">// Application.java
+ApiKeyAuthFilter apiKey = new ApiKeyAuthFilter.Builder()  
+        .setAuthenticator(apiKeyAuthenticator)
+        .setAuthorizer(authorizer)
+        .setPrefix("API key")
+        .buildAuthFilter();
+DefaultAuthFilter default = new DefaultAuthFilter.Builder()  
+        .setAuthenticator(defaultAuthenticator)
+        .setAuthorizer(authorizer)
+        .setPrefix("default")
+        .buildAuthFilter();
+
+List&lt;AuthFilter&gt; filterList = Lists.newArrayList(apiKey, default);  
+ChainedAuthFilter chainedAuthFilter = new ChainedAuthFilter&lt;&gt;(filterList)
+
+environment.jersey().register(new AuthDynamicFeature(chainedAuthFilter));  
+environment.jersey().register(RolesAllowedDynamicFeature.class);  
+</code></pre>
+
+<p>The <code>AuthFilter</code>s and their respective <code>Authenticator</code>s are described below.</p>
+
+<h1 id="apikeyauthentication">API key authentication</h1>
+
+<p>As mentioned, my user authentication is done with an API key that is passed in the Authorization HTTP header.  The filter extracts the value and passes it to the <code>authenticate()</code> method of <code>ApiKeyAuthenticator</code>.</p>
+
+<pre><code class="language-java">// ApiKeyAuthFilter.kt
+override fun filter(requestContext: ContainerRequestContext) {  
+    val credentials = requestContext.headers.getFirst(HttpHeaders.AUTHORIZATION)
+    if (!authenticate(requestContext, credentials, API_KEY_AUTH)) {
+        throw WebApplicationException(unauthHandler.buildResponse(prefix, realm))
+    }
+}
+</code></pre>
+
+<p>The API key authenticator checks the databse to see if the given API key exists.  If the key is found, the matching <code>User</code> is returned; if not found, an empty <code>Optional</code> is returned instead.</p>
+
+<pre><code class="language-java">// ApiKeyAuthenticator.kt
+@Throws(AuthenticationException::class)
+override fun authenticate(credentials: ApiKey): Optional&lt;User&gt; {  
+    val userId = apiKeyDao.getUserIdForAccessToken(credentials.accessToken)
+    if (userId != 0) {
+        val user = userDao.getUser(userId)
+        return Optional.of(user)
+    }
+
+    return Optional.empty&lt;User&gt;()
+}
+</code></pre>
+
+<h1 id="defaultauthentication">Default authentication</h1>
+
+<p>If API key authentication fails, either because the user provided invalid credentials or no credentials at all, then the next <code>AuthFilter</code> configured in the <code>ChainedAuthFilter</code> is invoked.  Authentication for the default user doesn't actually check anything, so <code>Unit</code> is passed instead of credentials:</p>
+
+<pre><code class="language-java">// DefaultAuthFilter.kt
+override fun filter(requestContext: ContainerRequestContext) {  
+    if (!authenticate(requestContext, Unit, "DEFAULT")) {
+        throw WebApplicationException(unauthHandler.buildResponse(prefix, realm))
+    }
+}
+</code></pre>
+
+<p>As the last authenticator to run in the chain, the DefaultAuthenticator never fails, it simply returns a default-constructed <code>User</code> object.</p>
+
+<pre><code class="language-java">// DefaultAuthenticator.kt
+@Throws(AuthenticationException::class)
+override fun authenticate(credentials: Unit): Optional&lt;User&gt; {  
+    logger.debug("Using default auth");
+
+    val user = User()
+    return Optional.of(user)
+}
+</code></pre>
+
+<h1 id="usageinservlets">Usage in servlets</h1>
+
+<p>The <code>User</code> object looks like this:</p>
+
+<pre><code class="language-java">// User.kt
+data class User(val id: Int, roles: List&lt;Role&gt;) : Principal {  
+    constructor() : this(0, emptyList())
+
+    init {
+        var theRoles = mutableListOf&lt;Role&gt;()
+
+        if (id != 0) theRoles.add(Role.USER)
+
+        roles = theRoles.toList()
+    }
+
+    fun hasRole(role: Role): Boolean {
+        return roles.contains(role)
+    }
+}
+</code></pre>
+
+<p>Which allows me to check whether valid authentication was provided within a servlet:</p>
+
+<pre><code class="language-java">// SomeResource.kt
+fun optionallyAuthenticatedResource(@Context context: SecurityContext) {  
+    user = context.getUserPrincipal()
+
+    if (user != null &amp;&amp; user.hasRole(Role.USER)) {
+        // Do something for authenticated users
+    }
+
+    // Do other stuff for all users
+}
+</code></pre>]]></content:encoded></item><item><title><![CDATA[Reading Devise Sessions In Java]]></title><description><![CDATA[<p>I have a Ruby on Rails app that uses <a href="https://github.com/plataformatec/devise">Devise</a> for authentication and session management, the latter is really done by <a href="https://github.com/hassox/warden">Warden</a>.  We are making a server-side companion for Ruby written in <a href="https://kotlinlang.org/">Kotlin</a> &amp; Java and want to be able to share sessions between the two runtimes.</p>
+
+<p><a href="http://jruby.org/">JRuby</a> makes this</p>]]></description><link>http://localhost:2368/2016/05/02/reading-devise-sessions-in-java/</link><guid isPermaLink="false">27672404-0f4a-4153-81aa-c42119a0a6dc</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Mon, 02 May 2016 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>I have a Ruby on Rails app that uses <a href="https://github.com/plataformatec/devise">Devise</a> for authentication and session management, the latter is really done by <a href="https://github.com/hassox/warden">Warden</a>.  We are making a server-side companion for Ruby written in <a href="https://kotlinlang.org/">Kotlin</a> &amp; Java and want to be able to share sessions between the two runtimes.</p>
+
+<p><a href="http://jruby.org/">JRuby</a> makes this easy, allowing you to run Ruby on the JVM.  While JRuby supports running entire Ruby applications, for reading sessions we simply want to embed a bit of Ruby within our Java application.  This is accomplished by using <a href="https://github.com/jruby/jruby/wiki/RedBridge">JRuby Embed (AKA Red Bridge)</a>.</p>
+
+<p>First, let's look at the Ruby required to read <a href="http://stackoverflow.com/a/23683925/17339">Warden sessions</a>.  Our app stores sessions in a local databae, so we don't have to deal with encryption or encoding.  If your sessions are stored in cookies, they will be encrypted—<a href="http://nipperlabs.com/rails-secretkeybase">this article</a> should give you what you need to decrypt the session.</p>
+
+<pre><code class="language-ruby">s = Marshal.load(session)  
+csrfToken = s['_csrf_token']  
+userId = s['warden.user.user.key'][0][0]  
+authenticatableSalt = s['warden.user.user.key'][1]  
+</code></pre>
+
+<p>The operative part of this is really just one call, <code>Marshal.load(session)</code>.  That invokes Ruby's built-in serializer, <code>Marshal</code>, to deserialize the session string.  The subsequent lines just assign variables to make extracting the desired data in Java easier.  Here is that script used in context to pull the information into Java:</p>
+
+<pre><code class="language-java">public Session getSession(String session) {  
+    container.put("session", session);
+    container.runScriptlet(rubyScript);
+
+    int userId = ((Long) container.get("userId")).intValue();
+    String authenticatableSalt = ((String) container.get("authenticatableSalt"));
+    String csrfToken = ((String) container.get("csrfToken"));
+
+    return new Session(userId, authenticatableSalt, csrfToken);
+}
+</code></pre>
+
+<p>The entire Java class looks like this:</p>
+
+<pre><code class="language-java">import org.jruby.embed.LocalContextScope;  
+import org.jruby.embed.LocalVariableBehavior;  
+import org.jruby.embed.ScriptingContainer;
+
+public class SessionReader {  
+    private final ScriptingContainer container =
+        new ScriptingContainer(LocalContextScope.CONCURRENT,
+                               LocalVariableBehavior.PERSISTENT);
+    private final String script = "s = Marshal.load(session);" +
+                                  "csrfToken = s['_csrf_token'];" +
+                                  "userId = s['warden.user.user.key'][0][0];" +
+                                  "authSalt = s['warden.user.user.key'][1];";
+
+    public Session getSession(String session) {
+        container.put("session", session);
+        container.runScriptlet(script);
+
+        int userId = ((Long) container.get("userId")).intValue();
+        String authSalt = ((String) container.get("authSalt"));
+        String csrfToken = ((String) container.get("csrfToken"));
+        return new Session(userId, authSalt, csrfToken);
+    }
+}
+
+class Session {  
+    private final int userId;
+    private final String authenticatableSalt;
+    private final String csrfToken;
+
+    public Session(int userId, String authenticatableSalt, String csrfToken) {
+        this.userId = userId;
+        this.authenticatableSalt = authenticatableSalt;
+        this.csrfToken = csrfToken;
+    }
+}
+</code></pre>
+
+<p>Using <code>LocalContextScope.CONCURRENT</code> allows this class to be threadsafe.  JRuby creates a single runtime and shared variables for the <code>ScriptingContainer</code>, but separate variable mappings for each thread.  The other modifier, <code>LocalVariableBehavior.PERSISTENT</code>, keeps the local variables around after we call <code>runScriptlet()</code> allowing for their retrieval back in Java land.</p>
+
+<p>See the <a href="https://github.com/jruby/jruby/wiki/RedBridgeExamples">Red Bridge Examples</a> for more information on using Ruby within Java.</p>]]></content:encoded></item><item><title><![CDATA[Better Rails]]></title><description><![CDATA[<p>Rails <a href="http://guides.rubyonrails.org/caching_with_rails.html">provides a caching framework</a>, built-in.  Just set <code>config.cache_store</code> in your <code>application.rb</code>.  The easiest way to use caching is using time-base invalidation—you compute something expensive and store it in the cache with an expiration time.  The first time you try to retrieve it after the expiration,</p>]]></description><link>http://localhost:2368/2016/03/18/better-rails/</link><guid isPermaLink="false">12f145c1-363e-41fb-8d0a-28f00ac938d2</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Fri, 18 Mar 2016 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>Rails <a href="http://guides.rubyonrails.org/caching_with_rails.html">provides a caching framework</a>, built-in.  Just set <code>config.cache_store</code> in your <code>application.rb</code>.  The easiest way to use caching is using time-base invalidation—you compute something expensive and store it in the cache with an expiration time.  The first time you try to retrieve it after the expiration, recompute &amp; cache the new value.</p>
+
+<pre><code class="language-ruby">class Product &lt; ActiveRecord::Base  
+  def expensive_operation
+    Rails.cache.fetch("product/expensive_operation", expires_in: 12.hours) do
+      LVMH::API.do_it()
+    end
+  end
+end  
+</code></pre>
+
+<p>Many things in the world don't respond well to only being updated on a wallclock schedule.  User profiles are viewed much more often than they are updated, meaning time-based cache expiration will cause needless regeneration of unchanged values.  Furthermore, when a user does update their profile, not seeing that reflected immediately is confusing.</p>
+
+<p>The first problem can be ameliorated by using very long expirations and the latter by force-expiring related cache entries when issuing updates.  That last bit leaves a huge potential pitfall: forgetting to invalidate the cache when updating the value.  Another approach for keeping your cache fresh is to use a quickly-retrieved value that indicates whether the cache needs to be regenerated.</p>
+
+<p>In <a href="http://www.forumforall.net">our</a> application, user profiles show friend relationships and use that information to pull in recent comments from those friends, an expensive operation spanning many tables.  One key bit that informs how much searching we need to do is those friend relationships.  If the user has new friends we need to look at all of those new friend's recent comments and build them for display.  While checking the entire friends list is expensive, checking the latest change for a single user is quick.</p>
+
+<pre><code class="language-ruby">class FriendsAPI  
+  def get_friends(user, status)
+    key_prefix = "friends_api:get_friends:#{user.id}:#{status}"
+    timestamp = user.most_recent_friends_time
+
+    Rails.cache.fetch("#{key_prefix}:#{timestamp}", expires_in: 1.week) do
+      Rails.cache.delete_matched("#{key_prefix}:*")
+
+      inflated_friends = []
+      friends = user.get_all_friends
+      friends.each do |friend|
+        inflated_friends &lt;&lt; InflatedFriend.new(friend)
+      end
+
+      inflated_friends
+    end
+  end
+end  
+</code></pre>
+
+<p>The key here is that <code>user.most_recent_friends_time</code> is a fast query.  The cache key is a compound of the calling-specific values (the user and the requested status) and the timestamp for the most recent friend change time.  When the method is executed, <code>Rails.cache.fetch()</code> attempts to retrieve an entry for the last friend change time.  If the user hasn't created any new friendships since the last time the method ran (and it's been less than <a href="https://www.youtube.com/watch?v=fC_q9KPczAg">one week</a>), it'll be in the cache.  If the user has made more friends, then the cache will miss.  On a miss, the first thing to do is remove any prior entries, then just do the expensive bit and return it.</p>]]></content:encoded></item><item><title><![CDATA[Winter Tech Forum Is The Finest]]></title><description><![CDATA[<p><img src="https://farm2.staticflickr.com/1621/25017324783_93c29cc2ed_z_d.jpg" alt="Snowshoeing"></p>
+
+<p>This past week I was in <a href="https://en.wikipedia.org/wiki/Crested_Butte,_Colorado">Crested Butte, Colorado</a> at the second annual <a href="http://www.mindviewinc.com/Conferences/JavaPosseRoundup/">Winter Tech Forum</a>. WTF is an <a href="http://www.mindviewinc.com/Conferences/OpenSpaces.html">Open Spaces conference</a>, where there is no pre-planning, aside from organizing a place for the conference to happen. Attendees begin coming up with the schedule of discussions on the first day</p>]]></description><link>http://localhost:2368/2016/03/07/winter-tech-forum-is-the-finest/</link><guid isPermaLink="false">73ac60dc-c201-4e70-a5c1-efa68276402d</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Mon, 07 Mar 2016 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><img src="https://farm2.staticflickr.com/1621/25017324783_93c29cc2ed_z_d.jpg" alt="Snowshoeing"></p>
+
+<p>This past week I was in <a href="https://en.wikipedia.org/wiki/Crested_Butte,_Colorado">Crested Butte, Colorado</a> at the second annual <a href="http://www.mindviewinc.com/Conferences/JavaPosseRoundup/">Winter Tech Forum</a>. WTF is an <a href="http://www.mindviewinc.com/Conferences/OpenSpaces.html">Open Spaces conference</a>, where there is no pre-planning, aside from organizing a place for the conference to happen. Attendees begin coming up with the schedule of discussions on the first day of the conference, and continue throughout as ideas flow.</p>
+
+<p>See also: <a href="http://diannemarsh.com/conference-summary-winter-tech-forum-2016/">Dianne Marsh’s much more comprehensive summary</a> and <a href="http://chrisphelps.github.io/conferences/2016/03/13/Winter-Tech-Forum/">Chris Phelps' writeup</a>.</p>
+
+<h1 id="openspaces">Open Spaces</h1>
+
+<p>The participation of everyone present, combined with the way discussions, happen is what makes WTF special. <br>
+Open Spaces sessions are led by…whoever shows up. The person or people who had the idea might give a very brief introduction of their ideas on the topic or questions they are trying to explore, but from there the discussion can go anywhere. This leads to hugely informative sharing of experiences, be they technical, organizational, or otherwise. Recall illuminating conversations you’ve had with smart colleagues or friends in the tech industry and you’ve got a good idea of what the entire week at WTF is like.</p>
+
+<h1 id="people">People</h1>
+
+<p>The conference itself is only a small part of WTF. Crested Butte is a delightfully small town (1,500 people, 0.7 square miles) and most of the attendees stay within a few minutes walk of each other. Proximity is used to great effect during the progressive dinner, where each of the big houses cooks something and the whole conference ambles from one location to the next every half-hour. The traveling party makes for wonderful discussions, as you are encourage by the whirlwind of movement to meet and talk to new people. <br>
+WTF is also small, this year about 35 people, meaning you can, and should, meet everyone at the conference. Though some companies are <a href="https://www.netflix.com/">overrepresented</a> (which speaks well of their <a href="http://www.slideshare.net/reed2001/culture-1798664">culture</a>), the diversity of experience makes every interaction informative.</p>
+
+<h1 id="lightningtalks">Lightning Talks</h1>
+
+<p>Lightning talks are one of many highlights of WTF. The talks are five minutes, you can have whatever slides or props you want, and the topics are unconstrained. You would expect those on Kubernetes or Kotlin, but probably not the just-as-interesting ones on ski mountaineering, knitting, and Asperger syndrome. These quick introductions to a topic foster ideas that lead to later scheduled discussions, or just informative conversations with others.</p>
+
+<h1 id="technology">Technology</h1>
+
+<p>Technology-wise, JVM languages are popular amongst attendees, but even there the gamut from Java to Scala (with Kotlin somewhere in between) means ideas come from all angles. Open mindedness is a key tenet of everyone, so despite the very practical inclinations, languages like <a href="https://www.rust-lang.org/">Rust</a> and <a href="http://www.ponylang.org/">Pony</a> are exercised during the hack day. <br>
+Discussions of deployment and infrastructure (where to draw the line between the two), testing strategies, and artificial intelligence round out the technical side of discussions</p>
+
+<h1 id="organizations">Organizations</h1>
+
+<p>How we work together is the other big focus of WTF. Creating a company that trusts its employees (<a href="http://www.mindviewinc.com/">Bruce’s</a> <a href="http://www.reinventing-business.com/">Trust Organization</a> or Teal) is a popular discussion topic. The best way to interview &amp; hire for a high-functioning company was a standout session with markedly different viewpoints (particularly on coding tests) that were very informative.</p>
+
+<h1 id="activities">Activities</h1>
+
+<p>The daily schedule is organized to take advantage of the beautiful surrounds of Crested Butte. Most afternoons will have a group snowshoeing or cross-country skiing around the town or on the many trails through the alpine valleys. If you like downhill skiing, the <a href="http://www.skicb.com/">Crested Butte ski area</a> is a short bus ride away. Some folks don’t care for the evils of nature and just hang out in one of the great rental houses—folks are very open to sharing their space, food, and quaffables.</p>
+
+<h1 id="shouldyougo">Should you go?</h1>
+
+<p>If you are open minded and greatly enjoy discussions with smart people, more than being spoken to or addressing a crowd, then Winter Tech Forum is for you. <a href="https://twitter.com/dmarsh">Dianne Marsh</a> of Netflix wrote a <a href="http://diannemarsh.com/winter-tech-forum-2016-kind-conference/">good overview of the conference</a>, Bruce <a href="http://bruceeckel.github.io/2015/01/09/the-winter-tech-forum/">wrote about last year</a>, and you can find a bit more on the <a href="http://www.mindviewinc.com/Conferences/JavaPosseRoundup/">Winter Tech Forum</a>. <br>
+The best way to figure out if WTF is for you, though, is to talk to those who have been there before. Their description will do a far better job of selling it than anything written. If you are interested in learning from the experiences of others, humble, and open minded, you’ll have a great time at WTF!</p>]]></content:encoded></item><item><title><![CDATA[Serene Night Biking]]></title><description><![CDATA[<p>I have achieved my <a href="http://knowyourmeme.com/memes/this-isnt-even-my-final-form">final form</a> for nighttime biking. In short, it is to <a href="https://twitter.com/dinomite/status/516737212621537281">emulate a firetruck</a>.</p>
+
+<h2 id="roadbiking">Road biking</h2>
+
+<p>Bicycling on roads is dangerous.  Cars are a lot bigger than bikes, have a lot less to lose from any sort of interation, and it shows.  A lot of drivers are</p>]]></description><link>http://localhost:2368/2014/12/30/serene-night-biking/</link><guid isPermaLink="false">1b68e942-7e03-4c23-9840-a464b94283e7</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Tue, 30 Dec 2014 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>I have achieved my <a href="http://knowyourmeme.com/memes/this-isnt-even-my-final-form">final form</a> for nighttime biking. In short, it is to <a href="https://twitter.com/dinomite/status/516737212621537281">emulate a firetruck</a>.</p>
+
+<h2 id="roadbiking">Road biking</h2>
+
+<p>Bicycling on roads is dangerous.  Cars are a lot bigger than bikes, have a lot less to lose from any sort of interation, and it shows.  A lot of drivers are distracted, many are completely absent from the task at hand, and a small number are actively hostile to having anything else on the roads that are built exclusively for them.  That's just during the daytime.</p>
+
+<p><a href="http://usd.knog.com.au/beetle.html"><img src="http://usd.knog.com.au/media/catalog/product/cache/5/image/590x344/9df78eab33525d08d6e5fb8d27136e95/i/m/images-lights-beetle-beetle-lifestyle-2.jpg" alt="Knog Beetle: delightful, but grossly inadequate bike lights"></a></p>
+
+<p>Night biking can be quite a lot more risky, but the tables are turned.  If you bike at night without lights or with <a href="http://www.sigmasport.com/us/produkte/beleuchtung/safety_lights/micro_wr_2010/">inadequate</a> <a href="http://www.amazon.com/gp/product/B006CFTIBE?ref_=sr_1_1&amp;qid=1413590346&amp;sr=8-1&amp;keywords=small%20bike%20lights&amp;pldnSite=1">lights</a>, then you have no one else to blame.  There is a reason cars are required to have numerous lights and reflectors at night.  The speeds at which vehicles (both bikes and cars) move on the road only work safely at night when they are well lit.</p>
+
+<h2 id="basiclights">Basic lights</h2>
+
+<p>You need 4 lights on your bike: a pair front &amp; rear, all of which are bright (i.e. made in the past 2-3 years).  If your lights were made before 2010, they're likely just not bright enough to compete with all of the other light sources in even a semi-urban area.  <a href="http://thesweethome.com/reviews/best-commuter-bike-lights/">The Sweethome</a> has a great simple recommendation, a Cygolite pair consisting of a 350 lumen headlight and a 2 watt tail.  While this setup is perfectly adequate for relatively safe night biking to get to the level of serenity you need a second light on each end.</p>
+
+<p>Up front, get one of the brighter Cygolite models (<a href="http://www.amazon.com/gp/product/B00E1NQ3DU/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B00E1NQ3DU&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=2J63O4N66TZY3RBP">500</a> or <a href="http://www.amazon.com/gp/product/B00LXTORC4/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B00LXTORC4&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=HMLN4OUT5VJFCHY6">550</a> lumens) and for the rear a <a href="http://www.amazon.com/gp/product/B008ZTLSJA/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B008ZTLSJA&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=Y337F2M2FXUMDIGI">NiteRider Solas 2W</a>.  The idea here is to have a steady-burn light (the Cygoligte 500 up front and the Cygolite Hotshot in rear) to make you visually easy to track and a flashing light (the Cygolite 350 and NiteRider Solas) to attract attention whether cars are coming from front or behind.</p>
+
+<h2 id="helmetlights">Helmet lights</h2>
+
+<p>In addition to two pairs of lights on the bike, I also have a pair on my helmet.  I use a <a href="http://www.amazon.com/gp/product/B008QVXQ1K/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B008QVXQ1K&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=B4SR7ASNHOV63F3S">CatEye Omni 5</a> on the back, though a <a href="http://www.amazon.com/gp/product/B005CSZXBQ/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B005CSZXBQ&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=OUDGFKSPQKLFOKYA">CatEye Rapid 5</a> or other moderately bright, lightweight light would be good in this role.  For the front, I have a <a href="http://www.amazon.com/gp/product/B008JEHNGS/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B008JEHNGS&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=UBKRDN4T5Y6JHC7Z">NiteRider MiNewt USB</a> but any lightweight, 350 lumen or greater helmet-mountable light will work.  Having a light on your head is phenomenally useful for getting notice from inattentive drivers, particularly those at cross streets looking to turn.</p>
+
+<p><em>edit:</em> <a href="http://www.dansdata.com/">M'verygoodfriend</a> <a href="http://twitter.com/runswithbricks">Marshall</a> pointed out that <a href="http://www.amazon.com/gp/product/B00FRN0LTA/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B00FRN0LTA&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=MI2V7B7WOQKTVBSV">NiteRider Lumina Flare</a> fills both of the helmet light roles very well.</p>
+
+<h2 id="daytimeuse">Daytime use</h2>
+
+<p>Having bright-ass lights also makes biking during the day a more pleasurable experiene.  Just run all of your brightest lights on flash mode (in this case, just one on each end of the bike) to get drivers attention.  Since adopting this practice, particularly with the very bright NiteRider Solas rear, I now have cars that will dutifully slow down behind me and wait for a safe place to overtake.</p>
+
+<h2 id="revolights">RevoLights</h2>
+
+<p><a href="http://revolights.com/">RevoLights</a> aren't that bright—I'd guess they put out less than 100 lumens each—but they're apparent size make them novel and eye catching.  They're expensive at <a href="http://www.amazon.com/gp/product/B00O50TUSE/ref=as_li_qf_sp_asin_il_tl?ie=UTF8&amp;camp=1789&amp;creative=9325&amp;creativeASIN=B00O50TUSE&amp;linkCode=as2&amp;tag=dinomitenet-20&amp;linkId=23O3VACNN75BUUXB">$200 a set</a> but if you ride a lot at night in urban areas, or just want to look very flash, then they're a good addition to your night biking setup.</p>
+
+<h2 id="moreinfo">More info</h2>
+
+<p>If you want to know more or explore all of the bike light options, check out <a href="http://nathanhinkle.com/">Nathan Hinkle</a>'s <a href="http://www.bikelightdatabase.com/">Bike Light Database</a>.  These reviews started with the detailed <a href="http://bicycles.blogoverflow.com/2013/09/the-2013-headlights-review/">headlight</a> and <a href="http://bicycles.blogoverflow.com/2013/09/best-bike-tail-lights-review/">taillight</a> reviews from the <a href="http://bicycles.stackexchange.com/">Bicycles StackExchange</a> <a href="http://bicycles.blogoverflow.com/">blog</a> which give a lot of information on his methodology and the vast array of options in the bike light world.</p>]]></content:encoded></item><item><title><![CDATA[Wunderground With The Lacrosse C84612]]></title><description><![CDATA[<p>I got a <a href="http://www.lacrossetechnology.com/c84612/">La Crosse C84612</a> weather station as a gift.  Costco sold this model sometime last year, though now the closest thing they have is a quite expensive <a href="http://www.costco.com/Oregon-Scientific-WMR300-Ultra-Precision-Professional-Weather-System.product.100086588.html">Oregon Scientific unit</a>.</p>
+
+<p>The La Crosse has been a great weather station for me: easy to set up, accurate reporting, and</p>]]></description><link>http://localhost:2368/2014/04/04/wunderground-with-the-lacrosse-c84612/</link><guid isPermaLink="false">274bae1c-8aa8-4b82-ba5e-81aa54a0547a</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Fri, 04 Apr 2014 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>I got a <a href="http://www.lacrossetechnology.com/c84612/">La Crosse C84612</a> weather station as a gift.  Costco sold this model sometime last year, though now the closest thing they have is a quite expensive <a href="http://www.costco.com/Oregon-Scientific-WMR300-Ultra-Precision-Professional-Weather-System.product.100086588.html">Oregon Scientific unit</a>.</p>
+
+<p>The La Crosse has been a great weather station for me: easy to set up, accurate reporting, and no interaction required.  One of the features it came with that I was most excited about was internet connetivity.  The station comes with a gateway that wirelessly (900MHz, not wifi) links up with the other components of the weather station, which also link wirelessly.  Good system in theory, but it's only set up to send data to La Crosse Alerts™, a website which I can best describe as functional.</p>
+
+<p><a href="https://www.flickr.com/photos/dinomite/13623412293/"><img src="https://farm8.staticflickr.com/7241/13623412293_bdc93cd82f_z.jpg" alt="The main view of La Crosse Alerts™"></a></p>
+
+<p>Since the output of the gateway is simply data on the wire, I figured it'd be possible to capture the communication between the gateway and the La Crosse Alerts™ server.  The first step in such a journey is to look around and see what other folks have found, and what a productive step that was this time.</p>
+
+<p>I stumbled across a <a href="http://www.wxforum.net/index.php?topic=14299.0">thread on WXForum</a> of folks discussing the GW1000U, which is the gateway that is part of the C84612 weather station.  If you read through there, you'll see that <a href="http://www.wxforum.net/index.php?action=profile;u=11566">skydvrz</a> has put in a ton of effort and reverse engineer the communication.  He has written a Windows program that takes the place of the La Crosse Alerts server, collecting data from the gateway and storing it in MySQL.  Create an account on the forum and ask skydvrz for the latest code.</p>
+
+<p>The best part about this replacement server is that it sends dtaa to Weather Underground, which has a <a href="http://www.wunderground.com/weatherstation/WXDailyHistory.asp?ID=KVAARLIN28">much better interface for weather stations</a>, providing history &amp; graphs that are far superior to La Crosse's site.</p>]]></content:encoded></item><item><title><![CDATA[Making 1080p Timelapses With Lightroom]]></title><description><![CDATA[<p>There are <a href="http://photographyforrealestate.net/2012/09/09/how-to-use-lightroom-4-to-create-a-time-lapse-video/">a bunch</a> of <a href="http://lightroom-blog.com/2013/09/17/timelapse-again-in-lightroom-5-2/">tutorials</a> for creating time-lapse videos in Lightroom.  All of the ones I found only provide a preset for making 1280x720 (720p) videos.  I took one of those presets and updated it to be make a <a href="http://localhost:2368/assets/JPEG 82 (1080p).lrtemplate">1920x1080 (1080p) video from stills</a>.</p>
+
+<p>Download this an add it</p>]]></description><link>http://localhost:2368/2014/02/13/making-1080p-timelapses-with-lightroom/</link><guid isPermaLink="false">c707cfe6-8a0a-47eb-8ef1-823c8d1411f6</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Thu, 13 Feb 2014 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>There are <a href="http://photographyforrealestate.net/2012/09/09/how-to-use-lightroom-4-to-create-a-time-lapse-video/">a bunch</a> of <a href="http://lightroom-blog.com/2013/09/17/timelapse-again-in-lightroom-5-2/">tutorials</a> for creating time-lapse videos in Lightroom.  All of the ones I found only provide a preset for making 1280x720 (720p) videos.  I took one of those presets and updated it to be make a <a href="http://localhost:2368/assets/JPEG 82 (1080p).lrtemplate">1920x1080 (1080p) video from stills</a>.</p>
+
+<p>Download this an add it to your Lightroom video presets.  On Mac, this is located at <code>~/Library/Application Support/Adobe/Lightroom/Export Presets/Video/</code>.  For Windows, <a href="http://store.apple.com/us">see here</a><sup id="fnref:1"><a href="http://localhost:2368/2014/02/13/making-1080p-timelapses-with-lightroom/#fn:1" rel="footnote">1</a></sup>.</p>
+
+<div class="footnotes"><ol><li class="footnote" id="fn:1"><p>Seriously not trying to be a dick, I just don't fucking know and give zero shits <a href="http://localhost:2368/2014/02/13/making-1080p-timelapses-with-lightroom/#fnref:1" title="return to article">↩</a></p></li></ol></div>]]></content:encoded></item><item><title><![CDATA[At-1-On Mac Os X]]></title><description><![CDATA[<p>at(1) is a standard command in <a href="http://www.freebsd.org/cgi/man.cgi?query=at&amp;sektion=1">every</a> <a href="http://unixhelp.ed.ac.uk/CGI/man-cgi?at">Unix-like</a> <a href="http://www.openbsd.org/cgi-bin/man.cgi?query=at&amp;apropos=0&amp;sektion=0&amp;manpath=OpenBSD+Current&amp;arch=i386&amp;format=html">operating</a> <a href="http://www.shrubbery.net/solaris9ab/SUNWaman/hman1/at.1.html">system</a> <a href="http://illumos.org/man/1/at">that</a> <a href="http://www.unix.com/man-page/opensolaris/1/at/">I</a> <a href="http://plan9.bell-labs.com/magic/man2html?man=at&amp;sect=1">know</a> <a href="http://netbsd.gw.com/cgi-bin/man-cgi?at++NetBSD-current">of</a>, including <a href="https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/at.1.html">Mac OS</a>, for scheduling tasks to be run at a later time.  Unfortunately, OS X doesn't run (or even seem to have) atd(8), the daemon responsible for running at(1)-scheduled tasks.  Complicating</p>]]></description><link>http://localhost:2368/2014/02/03/at-1-on-mac-os-x/</link><guid isPermaLink="false">337b79f4-ed0e-41a2-afcf-41d232119fad</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Mon, 03 Feb 2014 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>at(1) is a standard command in <a href="http://www.freebsd.org/cgi/man.cgi?query=at&amp;sektion=1">every</a> <a href="http://unixhelp.ed.ac.uk/CGI/man-cgi?at">Unix-like</a> <a href="http://www.openbsd.org/cgi-bin/man.cgi?query=at&amp;apropos=0&amp;sektion=0&amp;manpath=OpenBSD+Current&amp;arch=i386&amp;format=html">operating</a> <a href="http://www.shrubbery.net/solaris9ab/SUNWaman/hman1/at.1.html">system</a> <a href="http://illumos.org/man/1/at">that</a> <a href="http://www.unix.com/man-page/opensolaris/1/at/">I</a> <a href="http://plan9.bell-labs.com/magic/man2html?man=at&amp;sect=1">know</a> <a href="http://netbsd.gw.com/cgi-bin/man-cgi?at++NetBSD-current">of</a>, including <a href="https://developer.apple.com/library/mac/documentation/Darwin/Reference/ManPages/man1/at.1.html">Mac OS</a>, for scheduling tasks to be run at a later time.  Unfortunately, OS X doesn't run (or even seem to have) atd(8), the daemon responsible for running at(1)-scheduled tasks.  Complicating matters is the fact that at(1) is a very difficult to search for, because search engines strip such common words, so figuring out such issues can't really be done with even the best searching.  So here I'll list other things that one might search for: atq, atrm, and batch, which are all part of the at(1) suite of tools.</p>
+
+<p>My (likely vain) hope is that this post will spread a bit of knowledge and maybe catch searches, if someone's searches match my description.</p>]]></content:encoded></item><item><title><![CDATA[Anti Pull Dog Harnesses]]></title><description><![CDATA[<p><a href="https://www.youtube.com/watch?v=zH64dlgyydM">I like dogs</a> and recently got a beaglish one of my own from the <a href="http://www.lostdogrescue.org/">Lost Dog Foundation</a>.  While wonderful, he has the affliction of walking excitement common to hunting hounds—appropriate to his name, Scout wants to lead the way and suss out any squirrels to be found.  At only</p>]]></description><link>http://localhost:2368/2014/01/25/anti-pull-dog-harnesses/</link><guid isPermaLink="false">6321658f-f971-48a6-8188-6483c043680f</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Sat, 25 Jan 2014 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><a href="https://www.youtube.com/watch?v=zH64dlgyydM">I like dogs</a> and recently got a beaglish one of my own from the <a href="http://www.lostdogrescue.org/">Lost Dog Foundation</a>.  While wonderful, he has the affliction of walking excitement common to hunting hounds—appropriate to his name, Scout wants to lead the way and suss out any squirrels to be found.  At only 25 pounds, he won't drag you down the street, but the constant tugging on the leash is tiring.  I've tried a number of collars &amp; harnesses to try to combat this problem, and what follows are my opinions on them.</p>
+
+<p><a href="http://www.flickr.com/photos/dinomite/11892424355/"><img src="http://farm6.staticflickr.com/5471/11892424355_bd7c2bcc67_z.jpg" alt="Scout being Rowdy"></a></p>
+
+<h2 id="illusioncollarhttpwwwcesarswaycomshopillusiondogcollarleashsystem"><a href="http://www.cesarsway.com/shop/Illusion-Dog-Collar-Leash-System">Illusion Collar</a></h2>
+
+<p>My girlfriend had been watching a lot of <a href="http://www.cesarsway.com/">Caesar Millan</a> before we got our dog and we put a fair bit of stock in his methods.  Using a leash in the way that <a href="https://www.youtube.com/watch?v=vjub9dCBiv8">Caesar describes</a>, well up the dog's neck and close to the ears, allowed us to control Scout, but the leash wouldn't stay there, so we figured it was worth trying the oddly-named<sup id="fnref:1"><a href="http://localhost:2368/2014/01/25/anti-pull-dog-harnesses/#fn:1" rel="footnote">1</a></sup> Illusion Collar to make this easier.</p>
+
+<p>While the Illusion collar does what it's supposed to, keeping the operative part of the collar well up the dog's neck for better control, this did nothing for Scout and he remaiined unruly on walks.</p>
+
+<h2 id="petsafeeasywalkharnesshttpwwwamazoncomgpproductb0009zbkg4refas_li_ss_tlieutf8camp1789creative390957creativeasinb0009zbkg4linkcodeas2tagdinomitenet20"><a href="http://www.amazon.com/gp/product/B0009ZBKG4/ref=as_li_ss_tl?ie=UTF8&amp;camp=1789&amp;creative=390957&amp;creativeASIN=B0009ZBKG4&amp;linkCode=as2&amp;tag=dinomitenet-20">PetSafe Easy Walk Harness</a></h2>
+
+<p>I've found this harness to be by far the most effective.  The harness has a circle of straps around the dog's body, just behind their shoulders and a strap across the dog's chest.  The front strap has a cinching portion to which the leash clips, tightening a bit when the dog pulls.  More importantly, because the attachment is on the dog's chest, the force of any pulling turns them sideways, greatly limiting thier ability to pull.</p>
+
+<p>The downside to the Easy Walk is that the strap behind the dog's front legs can rub their fur-less armpits raw, as I've found with Scout and other friends have reported.</p>
+
+<h2 id="freedomnopullharnesshttpwwwamazoncomgpproductb0085xohdurefas_li_ss_tlieutf8camp1789creative390957creativeasinb0085xohdulinkcodeas2tagdinomitenet20"><a href="http://www.amazon.com/gp/product/B0085XOHDU/ref=as_li_ss_tl?ie=UTF8&amp;camp=1789&amp;creative=390957&amp;creativeASIN=B0085XOHDU&amp;linkCode=as2&amp;tag=dinomitenet-20">Freedom No-Pull Harness</a></h2>
+
+<p>This is set up similarly to the PetSafe Easy Walk mentioned above, but with additional versatility.  Like the PetSafe it has an attachment point on the dog's chest, with all of the noted advantages &amp; disadvantages, though the front attachment on the Freedom No-Pull isn't cinching.  Where it does have a cinching attachment point is on the dog's back between their shoulder blades.  Using this attachment doesn't provide nearly the pulling prevention of the front attachment, but it does keep from driving the underbody strap into the dog's armpits and chafing them.</p>
+
+<p>The intended arrangement is to clip a leash into both attachments and use it like a horse's reins—tug on the front one when the dog pulls to correct the behavior.  This is effective, but it does halve the length of your leash.</p>
+
+<div class="footnotes"><ol><li class="footnote" id="fn:1"><p>The Illusion collar is named after his estranged wife Ilusión <a href="http://localhost:2368/2014/01/25/anti-pull-dog-harnesses/#fnref:1" title="return to article">↩</a></p></li></ol></div>]]></content:encoded></item><item><title><![CDATA[Goruck Challenge Preparation]]></title><description><![CDATA[<p><a href="https://www.flickr.com/photos/dinomite/9157378869/"><img src="https://farm4.staticflickr.com/3713/9157378869_d05b4078ef_z.jpg"></a> <br>
+Photo credit: <a href="http://www.facebook.com/troyangrignon">Troy Angrignon</a></p>
+
+<p>I did the <a href="https://www.goruck.com/events/Challenge">GORUCK Challenge</a> last <br>
+weekend.  The GORUCK Challenge is a 12 hour guided tour of a city, led by <br>
+special forces guys known as the Cadre.  Every challenge, even in the same city, <br>
+is a different experience, tailored by the Cadre based upon their</p>]]></description><link>http://localhost:2368/2013/06/27/goruck-challenge-preparation/</link><guid isPermaLink="false">63009239-55fe-43ad-aff8-3ca07949da5a</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Thu, 27 Jun 2013 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><a href="https://www.flickr.com/photos/dinomite/9157378869/"><img src="https://farm4.staticflickr.com/3713/9157378869_d05b4078ef_z.jpg"></a> <br>
+Photo credit: <a href="http://www.facebook.com/troyangrignon">Troy Angrignon</a></p>
+
+<p>I did the <a href="https://www.goruck.com/events/Challenge">GORUCK Challenge</a> last <br>
+weekend.  The GORUCK Challenge is a 12 hour guided tour of a city, led by <br>
+special forces guys known as the Cadre.  Every challenge, even in the same city, <br>
+is a different experience, tailored by the Cadre based upon their desires, the <br>
+folks on the team, and what the city has to offer.</p>
+
+<h2 id="class662summary">Class 662 Summary</h2>
+
+<p>A team of 34 people, each with a 45-55 pound rucksack hiked &amp; ran 20 miles <br>
+around San Francisco over the course of 12 hours.  We were accompanied by two 30 <br>
+pound bags of quarters, a ~100 pound log, and, for about half of the time, <br>
+a ~300 pound couch adorned with a 210-230 pound person. In the last few hours, <br>
+we swapped the couch for a pair of 250 pound logs.</p>
+
+<h2 id="difficulty">Difficulty</h2>
+
+<p>Overall the event was a <em>ton</em> of fun.  Having read numerous things in the weeks <br>
+leading up to this, my first challenge, I had gotten a bit worried.  The number <br>
+of people who listed this as the hardest thing they'd ever done and hinted <br>
+at the misery they endured made it sound like a rough, "Well, I'm glad I did <br>
+that. Once." sort of thing.  Nothing could be further from the truth.  If <br>
+you're physically capable, you'll have a good time until the end.</p>
+
+<p>What do I mean by capable?  I don't think a single test other than the Challenge <br>
+itself (or perhaps doing a Light and saying it was easy) could make it clear, <br>
+but I can put it in CrossFit terms.  CrossFit + weight lifting is my main <br>
+regimen, 3-4 days a week at <a href="http://www.patriotcrossfit.com/blog/">Patriot CrossFit</a> <br>
+in Arlington if you want to get an idea of the programming.  I'm certainly no <br>
+firebreather, but I manage to do a majority of the workouts as prescribed and <br>
+in fairly good time.  If you can follow the <a href="http://www.crossfit.com/">main site</a>, <br>
+doing half of the workouts as prescribed without being horribly slow, you'll be <br>
+fine.  You need not be <a href="http://www.youtube.com/watch?v=xJ27XzR3HJc">Jason Kaplan</a> <br>
+to be in good enough shape—my 7 minute Fran is enough to make the Challenge a <br>
+non-killer event.</p>
+
+<h1 id="notesonpreparation">Notes on Preparation</h1>
+
+<h2 id="hydration">Hydration</h2>
+
+<p>I say hydration here because I think something more than water is important. <br>
+I used a <a href="https://www.goruck.com/Gear/Details/low-profile-hydration-bladder">low-profile SOURCE bladder</a> <br>
+which fit well in the main compartment between my bricks and the main flap. <br>
+I filled it with water and 6 <a href="https://www.amazon.com/dp/B001QW1L72/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B001QW1L72&amp;adid=16NHVNWNJT4379CHRA7K&amp;">Nuun tablets</a> <br>
+initially, and tossed in a few more tablets when I refilled at around 0300.  We <br>
+didn't stop for water again and I was out near the end of the challenge, along <br>
+with most of the team.  If my next Challenge is anywhere warmer, I'll find a way <br>
+to have a second bladder or even a couple of Nalgenes.</p>
+
+<h2 id="food">Food</h2>
+
+<p>I often deride cyclists for their obsession with fast carbs, thinking that <br>
+without sucking down maltodextrin every 20 minutes they might just go from being <br>
+a world-class überathelete on their Yellow Polkadot Single Baller Edition <br>
+Cervélo to a prole riding a Mongoose.  But it is to cyclists whom I turned when <br>
+gathering supplies for this challenge.  In the end, I downed seven gels and two <br>
+packs of chewie jobbies throughout the 12 hours.  Are those absolutely <br>
+necessary?  Not at all, I could have gotten through without any of that and <br>
+gone strict paleo with some bananas or some such.  But it would have sucked. <br>
+Having good blood sugar support after glycogen stores are depleted increases <br>
+your ability to perform for sure; more importantly, the carbohydrate combined <br>
+with caffeine improves mood, keeping the event from being a gruelling death <br>
+march.</p>
+
+<p>So hit up your local bike shop and get some of those goofy fast acting <br>
+carbohydrate sources.  I had a couple of <a href="https://www.amazon.com/dp/B0010TADUW/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B0010TADUW&amp;adid=01XQGWDWXR3T3TSYGRMM&amp;">Honey Stingers</a> <br>
+(which are mostly honey) but most of what I brought were caffeinated (35mg or
+70mg depending on the flavor) <a href="https://www.amazon.com/dp/B007I6NLFU/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B007I6NLFU&amp;adid=0YDREPJX49416514ZN73&amp;">Gu Roctane</a> <br>
+energy gels.  I drink tea regularly, so I think the regular-strength (35mg) ones <br>
+were best for me.  Next time I'll probably bring 10 gels along with a bunch of <br>
+the <a href="https://www.amazon.com/dp/B0041HKO3G/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B0041HKO3G&amp;adid=1KMX5P2VRMECJ8Q9Q0NJ&amp;">chewie versions</a>. <br>
+The chewies are amazingly delightful after you've speed marched across the city. <br>
+If you're the prepared sort, it'd be good to bring some extra.  Even amongst <br>
+such a rarefied group there are knuckleheads who bring little to no food.  If <br>
+someone's performance falls off, a caffeinated gel is a great way to bring them <br>
+back.</p>
+
+<p>I also brought a few bars (Luna or UberFood, I think) but only ate one.  It's <br>
+nice to have something different during a long break (5 minutes).</p>
+
+<h2 id="clothing">Clothing</h2>
+
+<p>This challenge was during June in San Francisco.  For those who don't know, <br>
+that's winter.  Paradoxically, it wasn't windy <em>or</em> foggy that night, but it was <br>
+a bit cold.</p>
+
+<p>I wore Under Armour leggings, some Champion workout shorts, <a href="http://www.drymaxsocks.com/running_hyper_thin.php">Drymax socks</a>, <br>
+a <a href="https://www.amazon.com/dp/B00275Q8ZW/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B00275Q8ZW&amp;adid=0JWP8VED4W44F2TK8VZ7&amp;">padded football shirt</a>, <br>
+a long-sleeve Under Armour Cold Gear top, and a workout shirt over that.</p>
+
+<p>Unsure of my shoe choice up until the day of The Challenge, I settled on Inov8 <br>
+F-Lite 195s.  I've been wearing minimalist shoes (Merrel Trail Gloves are my <br>
+favorites) exclusively for a few years now, but I was concerned that the extra <br>
+weight on my back would lead to a Bad Time for my feet &amp; knees.  I had bought <br>
+some F-Lite 230s which were what I had planed on until the day of, but I settled <br>
+on the 195s because my feet feel better in them.  They were just fine, despite <br>
+the weight and surfaces we were walking on.</p>
+
+<p><a href="http://www.fieggen.com/shoelace/surgeonknot.htm"><img src="http://www.fieggen.com/Dont_Link/FinishedSurgeonKnot1.jpg"></a></p>
+
+<p>The other thing you need to do is <a href="http://www.fieggen.com/shoelace/surgeonknot.htm">tie your shoes properly</a>. <br>
+If you can slip your shoes off without untying them, they aren't tied properly. <br>
+We had to stop multiple times during our first time hack in which we needed to <br>
+cover 3.5 miles in 35 minutes due to shoes that came untied or got flat tired. <br>
+Properly tying your shoes completely prevents both of these and will keep your <br>
+teammates from thinking you're incompetent from the beginning.</p>
+
+<p>Pockets.  You want pockets.  Movements are often an hour or more, during which <br>
+time you don't have opportunity to dig around your pack for the aforementioned <br>
+sugary delights.  Every time you stop, ensure your pockets have a gel or two in <br>
+them.  Pockets are also where you'll shove the trash after you down one of those <br>
+as cadre are strict about littering, rightly so.</p>
+
+<h2 id="yourruck">Your Ruck</h2>
+
+<p><a href="https://www.flickr.com/photos/dinomite/9159389132/"><img src="https://farm6.staticflickr.com/5540/9159389132_4c88fea201_c.jpg"></a></p>
+
+<p><a href="https://www.flickr.com/photos/dinomite/9159343672/"><img class="right" src="https://farm4.staticflickr.com/3667/9159343672_fa6d911781.jpg"></a></p>
+
+<p>Do something to your ruck so that you can differentiate it from everyone elses. <br>
+All cadre are different, but you'll end up taking your ruck off and passing it <br>
+to teammates at some point in the night, and if they all look the same, it's <br>
+impossible to find your own.  I had a light-colored War Stories &amp; Free Beer <br>
+patch so that I could identify my GR1 from the back; the loops of cord that I <br>
+use to hold my hydration tube makes it notable from the front.</p>
+
+<p>Having a black Omega carabiner clipped through three MOLLE sure does look cool, <br>
+but it's not particularly funcitonal.  I have one on my ruck and it's nice for <br>
+briefly attaching a water bottle or my bike helmet, but it's really difficult <br>
+to remove for other uses.  When your ruck is jammed full of bricks, water, and <br>
+yoga blocks, you can't manipulate the fabric enough to remove the 'biner <br>
+easily, so save yourself the hassle and have it only clipped through two loops <br>
+so that it's faster to get at.</p>
+
+<h2 id="otherjunk">Other Junk</h2>
+
+<p>Minimize it, but don't go crazy.  There are endless words written to the effect <br>
+of "if you're not sure, don't bring it".  I largely subscribe to this mentality, <br>
+as you most likely aren't going to need things, but there's a dose of realism <br>
+that is needed here.  Between the 30 pounds of bricks and the 10 pounds of <br>
+water and misc that are the minimum weight, you aren't going to notice a few <br>
+extra food bars, gels, or a windbreaker, so don't sweat it.  If the weather is <br>
+on the edge of being cold, bring the windbreaker.  I always carry a Sharpie &amp; <br>
+a pen in my ruck day to day and was sad that I didn't have them when we needed <br>
+to write things down.</p>
+
+<p>Things to certainly not bring are those that will absorb water.  Carrying around <br>
+a small portion of your local body of water is a bad time.</p>]]></content:encoded></item><item><title><![CDATA[Packing Bricks For The Goruck Challenge]]></title><description><![CDATA[<p><a href="http://www.flickr.com/photos/dinomite/8248913885/in/photostream/"><img class="right" src="http://farm9.staticflickr.com/8486/8248913885_8828ee2a54.jpg" alt="GORUCK GR Echo with 4 bricks &amp; yoga block"></a></p>
+
+<p>I have finally signed up for a <a href="https://www.goruckchallenge.com/">GORUCK Challenge</a>.  The event is 6 months off, but thanks to Jason posting <a href="http://www.gorucknews.com/challenge/wrapping-bricks-explained/">Wrapping Bricks Explained</a> I've been playing around with packing bricks in my rucks.</p>
+
+<p>I followed the instructions on the above mentioned post for wrapping the bricks in pairs and took</p>]]></description><link>http://localhost:2368/2012/12/03/packing-bricks-for-the-goruck-challenge/</link><guid isPermaLink="false">77d8dd85-afbd-4cde-9105-be6f3f67e92a</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Mon, 03 Dec 2012 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><a href="http://www.flickr.com/photos/dinomite/8248913885/in/photostream/"><img class="right" src="http://farm9.staticflickr.com/8486/8248913885_8828ee2a54.jpg" alt="GORUCK GR Echo with 4 bricks &amp; yoga block"></a></p>
+
+<p>I have finally signed up for a <a href="https://www.goruckchallenge.com/">GORUCK Challenge</a>.  The event is 6 months off, but thanks to Jason posting <a href="http://www.gorucknews.com/challenge/wrapping-bricks-explained/">Wrapping Bricks Explained</a> I've been playing around with packing bricks in my rucks.</p>
+
+<p>I followed the instructions on the above mentioned post for wrapping the bricks in pairs and took Asha Wagner's <a href="http://nuffsaid6.blogspot.com/2011/11/goruck-tough-sf-class-086.html">advice for securing the bricks</a> in a GORUCK pack using <a href="https://www.amazon.com/dp/B007A2XFYE/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B007A2XFYE&amp;adid=14454BYTXX0X67M3EC7K&amp;">Sea to Summit 3/4" straps</a> to secure them on the ruck's internal <a href="http://en.wikipedia.org/wiki/Pouch_Attachment_Ladder_System">PALS webbing</a>.  To the right are two pairs of bricks (4 total) in a GR Echo.</p>
+
+<p>I'm pretty light, just under 150 most days, so 4 bricks is the prescription.  A yoga block is the perfect thing to fill the extra space—dense but soft and about the size of two bricks.  One note is that you can indeed fit 6 bricks into a GR Echo, with just a bit of room to spare.  The third package of bricks takes the place of the yoga block, with a bit of space on either side.  Unfortunately, there isn't nearly enough space for a hydration bladder along with them.  If you're taking 6 bricks to the Challenge, get a GR1 or Radio Ruck.</p>]]></content:encoded></item><item><title><![CDATA[Tough Mudder Mid Atlantic 2013]]></title><description><![CDATA[<p>After not doing Tough Mudder <a href="http://dinomite.net/blog/2010/tough-mudder-norcal-2010/">since 2010</a>, <br>
+I signed up for the Mid-Atlantic event this year.  Here's my advice for folks <br>
+looking for tips before running.</p>
+
+<p>Over the past few years I've exercised almost exclusively in <a href="http://www.vibramfivefingers.com/index.htm">Vibram <br>
+FiveFingers</a> mainly because I feel <br>
+so much more stable when running &amp; jumping.</p>]]></description><link>http://localhost:2368/2012/09/11/tough-mudder-mid-atlantic-2013/</link><guid isPermaLink="false">accf84bc-21c9-4bdc-ab39-52a0c55b7986</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Tue, 11 Sep 2012 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p>After not doing Tough Mudder <a href="http://dinomite.net/blog/2010/tough-mudder-norcal-2010/">since 2010</a>, <br>
+I signed up for the Mid-Atlantic event this year.  Here's my advice for folks <br>
+looking for tips before running.</p>
+
+<p>Over the past few years I've exercised almost exclusively in <a href="http://www.vibramfivefingers.com/index.htm">Vibram <br>
+FiveFingers</a> mainly because I feel <br>
+so much more stable when running &amp; jumping.  Since switching to minimalist <br>
+street shoes for everyday wear (<a href="http://www.merrell.com/US/en-us/Product.mvc.aspx/22875M/50390/Mens/Barefoot-Run-Trail-Glove">Merrell Trail Gloves</a> <br>
+and <a href="http://www.amazon.com/dp/B004KZP5AG/ref=as_li_ss_til?tag=dinomitenet-20&amp;camp=0&amp;creative=0&amp;linkCode=as4&amp;creativeASIN=B004KZP5AG&amp;adid=05E13DHZT6EMTB01FEFZ">New Balance Minimus</a>) <br>
+my knees, hips, and back seem happier.  Last time I did Tough Mudder, I wore <br>
+some old cross-trainer style tennis shoes, but by this point I've gotten rid of <br>
+all the thick-soled tennis shoes I once had.  I ended up wearing my New Balance <br>
+MT20s for the run and they worked very well.  Clearning them after the race was <br>
+just a few minutes of hosing them off outside and then tossing them in the <br>
+washing machine.</p>
+
+<p>I wore some Mechanix gloves (the basic velcro cuff model) the first time I did <br>
+Tough Mudder.  This time I brought some along but chose not to wear them. There <br>
+are only a couple of obstacles for which you might want them, and I don't think <br>
+those are sufficiently abrasive or splintery to extra mudweight you carry in <br>
+gloves.  Focus on wearing as little clothing as possible—the first time you hit <br>
+a mud pit your shirt &amp; shorts carry a lot of it with you.</p>
+
+<p>Training is another big question that people have.  Mine is pretty much the same <br>
+as previously: I do CrossFit 2-3 times a week and 1-2 days a week of Olympic <br>
+lifting.  In the 6 months prior to doing Tough Mudder I went on a couple of ~3.5 <br>
+mile runs.  The only other running I did was the occasional CrossFit WOD that <br>
+involved a 400 or 800 meter run.  I think that pretty well drives home my <br>
+admonition that you don't need to run a lot to be a competent runner and perform <br>
+well in endurance running events.</p>
+
+<p>Having said that, this Tough Mudder was the same as last—85% of the people walk <br>
+the majority of the event; another 10% run between half of the obstacles. <br>
+Running the whole way easily puts you in the top 5% of participants.  Aside from <br>
+being well prepared physically and highly self motivated, the best way to run <br>
+the whole way is to do it with a group of friends.</p>]]></content:encoded></item><item><title><![CDATA[Crumpler Haven With Canon 40d]]></title><description><![CDATA[<p><img src="http://dinomite.smugmug.com/Other/Gear/i-9ZzG8wn/0/L/MG0232-L.jpg" class="right" alt="GORUCK GR1 with Crumpler Haven inside"></p>
+
+<p>I recently picked up a <a href="http://www.crumpler.com/us/Camera-Bags/Camera-Pouches/Haven-M.html">Crumpler Haven</a> to use for carrying my Canon 40D.  I purchased the medium size with some trepadation, as their size recommendations sugges that it won't fit anything larger than a compact SLR (Canon Rebel, Nikon D3x00).  It seems that th suggestions are too conservative—my</p>]]></description><link>http://localhost:2368/2012/08/12/crumpler-haven-with-canon-40d/</link><guid isPermaLink="false">b836ee9d-39ac-406d-87f2-02864a366c08</guid><dc:creator><![CDATA[Drew Stephens]]></dc:creator><pubDate>Sun, 12 Aug 2012 12:00:00 GMT</pubDate><content:encoded><![CDATA[<p><img src="http://dinomite.smugmug.com/Other/Gear/i-9ZzG8wn/0/L/MG0232-L.jpg" class="right" alt="GORUCK GR1 with Crumpler Haven inside"></p>
+
+<p>I recently picked up a <a href="http://www.crumpler.com/us/Camera-Bags/Camera-Pouches/Haven-M.html">Crumpler Haven</a> to use for carrying my Canon 40D.  I purchased the medium size with some trepadation, as their size recommendations sugges that it won't fit anything larger than a compact SLR (Canon Rebel, Nikon D3x00).  It seems that th suggestions are too conservative—my 40D fits just fine with the Canon 10-22mm or 17-55mm affixed and leaves enough room for a 50mm alongside.  You can't fit two big lenses, like the aforementioned zooms, in the bag simultaneously, but you can reverse my setup (50mm on the camera, bigger lens beside it).</p>
+
+<p>The Haven has proved quite nice.  It's enough on its own to toss in the car if I don't plan on walking much in my journey.  More importantly, it fits perfectly in a <a href="https://www.goruckgear.com/Gear/Details/3">GR1</a> beside a liter of water.</p>]]></content:encoded></item></channel></rss>
